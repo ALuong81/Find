@@ -17,7 +17,7 @@ def validate_entry(df):
     f = fibo(df)
     p = df["close"].iloc[-1]
 
-    if abs(p - f["entry"]) / p < 0.02:
+    if abs(p - f["entry"]) / p < 0.03:
         return True, f
 
     return False, f
