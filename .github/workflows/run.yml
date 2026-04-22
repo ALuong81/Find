@@ -1,4 +1,4 @@
-name: Trading Bot
+name: Find Bot
 
 on:
   schedule:
