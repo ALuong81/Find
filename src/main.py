@@ -11,86 +11,82 @@ from fake_breakout import detect_fake_breakout
 from entry import validate_entry
 from risk import market_risk
 
-from sector_history import save_sector_history
-from sector_trend import detect_emerging_sectors
-from sector_heatmap import build_heatmap
-
-from alert import send, send_image
-from logger import log_info, log_error
+from alert import send
 
 
 def main():
 
-    log_info("=== START RUN ===")
+    print("🚀 START BOT")
 
-    try:
-        # 1. load symbols
-        df_symbols = load_symbols()
+    # 1. load symbols
+    df_symbols = load_symbols()
+    print("TOTAL SYMBOLS:", len(df_symbols))
 
-        if df_symbols.empty:
-            log_error("No symbols")
-            return
+    if df_symbols.empty:
+        print("❌ NO SYMBOLS")
+        return
 
-        # 2. ranking
-        market = market_ranking(df_symbols, load_stock_data)
+    # 2. ranking
+    market = market_ranking(df_symbols, load_stock_data)
+    print("RANKED:", len(market))
 
-        if not market:
-            log_error("Market empty")
-            return
+    if not market:
+        print("❌ NO MARKET DATA")
+        return
 
-        top_stocks = market[:20]
-        top_sectors = sector_ranking(market)[:5]
+    top_stocks = market[:20]
+    top_sectors = sector_ranking(market)[:5]
 
-        # 3. sector tracking
-        save_sector_history(top_sectors)
+    print("TOP SECTORS:", top_sectors)
 
-        img = build_heatmap()
-        if img:
-            send_image(img)
+    # 3. risk check
+    df_index = load_index()
+    risk = market_risk(df_index)
 
-        emerging = detect_emerging_sectors()
+    print("RISK:", risk)
 
-        # 4. risk (KHÔNG dùng VNINDEX nữa)
-        df_index = load_index()
-        risk = market_risk(df_index)
+    if risk >= 3:
+        send("🚨 MARKET RISK HIGH - STOP")
+        print("STOP DUE TO RISK")
+        return
 
-        if risk >= 3:
-            send("🚨 MARKET RISK HIGH - STOP")
-            return
+    # 4. ALWAYS SEND OVERVIEW (quan trọng)
+    msg = "📊 BOT RUNNING\n\n"
 
-        # 5. market overview
-        msg = "📊 MARKET\n\n"
+    msg += "🔥 SECTORS:\n"
+    for s, sc in top_sectors:
+        msg += f"{s}: {round(sc,3)}\n"
 
-        msg += "🔥 SECTORS:\n"
-        for s, sc in top_sectors:
-            msg += f"{s}: {round(sc,3)}\n"
+    msg += "\n💪 TOP STOCKS:\n"
+    for s in top_stocks[:10]:
+        msg += f"{s['symbol']} {round(s['score'],3)}\n"
 
-        msg += "\n💪 STOCKS:\n"
-        for s in top_stocks[:10]:
-            msg += f"{s['symbol']} {round(s['score'],3)}\n"
+    send(msg)
 
-        if emerging:
-            msg += "\n🚀 Emerging:\n"
-            for s, sc in emerging[:3]:
-                msg += f"{s}: {round(sc,3)}\n"
+    print("SCAN ENTRY...")
 
-        send(msg)
+    count = 0
 
-        # 6. entry scan
-        for item in top_stocks:
+    # 5. scan entry
+    for item in top_stocks:
 
-            symbol = item["symbol"]
+        symbol = item["symbol"]
 
-            try:
-                df = load_stock_data(symbol)
+        try:
+            df = load_stock_data(symbol)
 
-                if detect_fake_breakout(df):
-                    continue
+            if detect_fake_breakout(df):
+                print(symbol, "❌ fake breakout")
+                continue
 
-                ok, fibo = validate_entry(df)
+            ok, fibo = validate_entry(df)
 
-                if ok:
-                    send(f"""
+            if ok:
+                count += 1
+
+                print(symbol, "✅ SIGNAL")
+
+                send(f"""
 📈 {symbol}
 
 Entry: {round(fibo["entry"],2)}
@@ -99,15 +95,11 @@ TP1: {round(fibo["tp1"],2)}
 TP2: {round(fibo["tp2"],2)}
 """)
 
-            except Exception as e:
-                log_error(f"{symbol}: {str(e)}")
-                continue
+        except Exception as e:
+            print(symbol, "ERROR:", e)
+            continue
 
-    except Exception as e:
-        log_error(f"MAIN ERROR: {str(e)}")
-        send(f"❌ SYSTEM ERROR: {str(e)}")
-
-    log_info("=== END RUN ===")
+    print("TOTAL SIGNAL:", count)
 
 
 if __name__ == "__main__":
