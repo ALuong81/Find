@@ -14,7 +14,6 @@ def is_valid_symbol(symbol):
 
     symbol = str(symbol).upper()
 
-    # loại index / ETF / CW
     if "VNINDEX" in symbol:
         return False
     if symbol.startswith(("E1", "FU", "CW", "C")):
@@ -66,8 +65,6 @@ def load_stock_data(symbol):
         raise Exception(f"{symbol} load error: {str(e)}")
 
 
-# 🔥 INDEX FAKE (ĐỂ KHÔNG BỊ LỖI)
+# ✅ INDEX PROXY (tránh lỗi VNINDEX)
 def load_index():
-
-    # dùng 1 cổ lớn làm proxy
     return load_stock_data("VCB")
