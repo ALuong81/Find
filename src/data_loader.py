@@ -1,31 +1,34 @@
+import logging
+logging.getLogger("vnstock").setLevel(logging.CRITICAL)
+
 from vnstock import Vnstock
 import datetime
 from cache import load_cache, save_cache
 from retry import retry
 
-def load_index():
 
-    from vnstock import Vnstock
-    import datetime
+def is_valid_symbol(symbol):
 
-    end = datetime.date.today()
-    start = end - datetime.timedelta(days=200)
+    if symbol is None:
+        return False
 
-    stock = Vnstock().stock(symbol="VCB", source="VCI")  
-    # hack: dùng 1 mã để lấy API object
+    symbol = str(symbol).upper()
 
-    df = stock.quote.history(
-        start=str(start),
-        end=str(end),
-        interval="1D"
-    )
+    # loại index / ETF / CW
+    if "VNINDEX" in symbol:
+        return False
+    if symbol.startswith(("E1", "FU", "CW", "C")):
+        return False
+    if len(symbol) > 4:
+        return False
 
-    # ⚠️ giả lập index = trung bình (fallback)
-    df["close"] = df["close"].rolling(5).mean()
+    return True
 
-    return df
-    
+
 def load_stock_data(symbol):
+
+    if not is_valid_symbol(symbol):
+        raise Exception(f"Invalid symbol {symbol}")
 
     cached = load_cache(symbol)
     if cached is not None:
@@ -35,7 +38,7 @@ def load_stock_data(symbol):
     start = end - datetime.timedelta(days=200)
 
     try:
-        stock = Vnstock().stock(symbol=symbol, source="VCI")
+        stock = Vnstock().stock(symbol=symbol, source="SSI")
 
         df = retry(lambda: stock.quote.history(
             start=str(start),
@@ -46,7 +49,6 @@ def load_stock_data(symbol):
         if df is None or df.empty:
             raise Exception(f"No data {symbol}")
 
-        # chuẩn hóa tên cột
         df = df.rename(columns={
             "time": "date",
             "open": "open",
@@ -62,3 +64,10 @@ def load_stock_data(symbol):
 
     except Exception as e:
         raise Exception(f"{symbol} load error: {str(e)}")
+
+
+# 🔥 INDEX FAKE (ĐỂ KHÔNG BỊ LỖI)
+def load_index():
+
+    # dùng 1 cổ lớn làm proxy
+    return load_stock_data("VCB")
