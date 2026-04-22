@@ -1,7 +1,7 @@
 import os
 
 from symbol_loader import load_symbols
-from data_loader import load_stock_data
+from data_loader import load_stock_data, load_index
 
 from market_ranking import market_ranking
 from sector_ranking import sector_ranking
@@ -58,8 +58,8 @@ def main():
         # =========================
         # 4. MARKET RISK CHECK
         # =========================
-        df_index = load_stock_data("VNINDEX")
-
+        # df_index = load_stock_data("VNINDEX")
+        df_index = load_index()
         risk = market_risk(df_index)
 
         if risk >= 3:
