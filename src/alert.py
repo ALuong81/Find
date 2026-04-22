@@ -8,7 +8,24 @@ def send(msg):
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
-    requests.post(url, data={
-        "chat_id": CHAT_ID,
-        "text": msg
-    })
+    try:
+        requests.post(url, data={
+            "chat_id": CHAT_ID,
+            "text": msg
+        })
+    except:
+        pass
+
+
+def send_image(path):
+
+    if not TELEGRAM_TOKEN or path is None:
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendPhoto"
+
+    try:
+        with open(path, "rb") as f:
+            requests.post(url, data={"chat_id": CHAT_ID}, files={"photo": f})
+    except:
+        pass
