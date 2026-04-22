@@ -1,4 +1,5 @@
-import os
+import logging
+logging.getLogger("vnstock").setLevel(logging.CRITICAL)
 
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index
@@ -23,30 +24,24 @@ def main():
     log_info("=== START RUN ===")
 
     try:
-        # =========================
-        # 1. LOAD SYMBOLS
-        # =========================
+        # 1. load symbols
         df_symbols = load_symbols()
 
-        if df_symbols is None or df_symbols.empty:
-            log_error("No symbols loaded")
+        if df_symbols.empty:
+            log_error("No symbols")
             return
 
-        # =========================
-        # 2. MARKET RANKING
-        # =========================
+        # 2. ranking
         market = market_ranking(df_symbols, load_stock_data)
 
         if not market:
-            log_error("Market ranking empty")
+            log_error("Market empty")
             return
 
         top_stocks = market[:20]
         top_sectors = sector_ranking(market)[:5]
 
-        # =========================
-        # 3. SAVE & VISUALIZE SECTOR FLOW
-        # =========================
+        # 3. sector tracking
         save_sector_history(top_sectors)
 
         img = build_heatmap()
@@ -55,43 +50,33 @@ def main():
 
         emerging = detect_emerging_sectors()
 
-        # =========================
-        # 4. MARKET RISK CHECK
-        # =========================
-        # df_index = load_stock_data("VNINDEX")
+        # 4. risk (KHÔNG dùng VNINDEX nữa)
         df_index = load_index()
         risk = market_risk(df_index)
 
         if risk >= 3:
-            send("🚨 MARKET RISK HIGH - STOP TRADING")
-            log_info("Market risk high - exit")
+            send("🚨 MARKET RISK HIGH - STOP")
             return
 
-        # =========================
-        # 5. SEND MARKET OVERVIEW
-        # =========================
-        msg = "📊 MARKET OVERVIEW\n\n"
+        # 5. market overview
+        msg = "📊 MARKET\n\n"
 
-        msg += "🔥 TOP SECTORS:\n"
+        msg += "🔥 SECTORS:\n"
         for s, sc in top_sectors:
             msg += f"{s}: {round(sc,3)}\n"
 
-        msg += "\n💪 TOP STOCKS:\n"
+        msg += "\n💪 STOCKS:\n"
         for s in top_stocks[:10]:
-            msg += f"{s['symbol']} | {round(s['score'],3)}\n"
-
-        msg += f"\n⚠️ Risk Level: {risk}"
+            msg += f"{s['symbol']} {round(s['score'],3)}\n"
 
         if emerging:
-            msg += "\n\n🚀 Emerging Sectors:\n"
+            msg += "\n🚀 Emerging:\n"
             for s, sc in emerging[:3]:
                 msg += f"{s}: {round(sc,3)}\n"
 
         send(msg)
 
-        # =========================
-        # 6. SCAN ENTRY
-        # =========================
+        # 6. entry scan
         for item in top_stocks:
 
             symbol = item["symbol"]
@@ -99,32 +84,23 @@ def main():
             try:
                 df = load_stock_data(symbol)
 
-                # ❌ bỏ fake breakout
                 if detect_fake_breakout(df):
                     continue
 
                 ok, fibo = validate_entry(df)
 
                 if ok:
-                    trade_msg = f"""
-📈 TRADE SETUP
-
-{symbol}
+                    send(f"""
+📈 {symbol}
 
 Entry: {round(fibo["entry"],2)}
 SL: {round(fibo["sl"],2)}
 TP1: {round(fibo["tp1"],2)}
 TP2: {round(fibo["tp2"],2)}
-
-Score: {round(item["score"],3)}
-"""
-
-                    send(trade_msg)
-
-                    log_info(f"Signal: {symbol}")
+""")
 
             except Exception as e:
-                log_error(f"{symbol} error: {str(e)}")
+                log_error(f"{symbol}: {str(e)}")
                 continue
 
     except Exception as e:
