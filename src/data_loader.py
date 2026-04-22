@@ -1,4 +1,4 @@
-from vnstock import stock_historical_data
+from vnstock import Vnstock
 import datetime
 from cache import load_cache, save_cache
 from retry import retry
@@ -12,18 +12,31 @@ def load_stock_data(symbol):
     end = datetime.date.today()
     start = end - datetime.timedelta(days=200)
 
-    df = retry(lambda: stock_historical_data(
-        symbol=symbol,
-        start_date=str(start),
-        end_date=str(end),
-        resolution="1D",
-        type="stock"
-    ))
+    try:
+        stock = Vnstock().stock(symbol=symbol, source="VCI")
 
-    if df is None or df.empty:
-        raise Exception(f"No data {symbol}")
+        df = retry(lambda: stock.quote.history(
+            start=str(start),
+            end=str(end),
+            interval="1D"
+        ))
 
-    df.columns = [c.lower() for c in df.columns]
+        if df is None or df.empty:
+            raise Exception(f"No data {symbol}")
 
-    save_cache(symbol, df)
-    return df
+        # chuẩn hóa tên cột
+        df = df.rename(columns={
+            "time": "date",
+            "open": "open",
+            "high": "high",
+            "low": "low",
+            "close": "close",
+            "volume": "volume"
+        })
+
+        save_cache(symbol, df)
+
+        return df
+
+    except Exception as e:
+        raise Exception(f"{symbol} load error: {str(e)}")
