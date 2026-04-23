@@ -6,13 +6,9 @@ def load_symbols():
 
     df["symbol"] = df["symbol"].astype(str).str.strip().str.upper()
 
-    # ❌ loại index / ETF / CW / rác
-    df = df[~df["symbol"].str.contains("VNINDEX|VN30|HNX|UPCOM", na=False)]
-    df = df[~df["symbol"].str.startswith(("E1", "FU", "CW", "C"), na=False)]
-
-    # chỉ giữ cổ phiếu thường
+    # lọc sạch
     df = df[df["symbol"].str.len().between(2, 4)]
+    df = df[~df["symbol"].str.startswith(("E1", "FU", "CW", "C"))]
 
-    df = df.dropna()
-
-    return df.reset_index(drop=True)
+    # 🔥 CHỈ GIỮ 80 MÃ (quan trọng)
+    return df.head(80)
