@@ -4,15 +4,35 @@ import time
 
 CACHE_DIR = "data/cache"
 
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+
+def path(symbol):
+    return f"{CACHE_DIR}/{symbol}.csv"
+
+
 def load_cache(symbol):
 
-    path = f"{CACHE_DIR}/{symbol}.csv"
+    p = path(symbol)
 
-    if not os.path.exists(path):
+    if not os.path.exists(p):
         return None
 
-    # 🔥 nếu cache < 1 ngày → dùng luôn
-    if time.time() - os.path.getmtime(path) < 86400:
-        return pd.read_csv(path)
+    # 🔥 cache < 1 ngày thì dùng
+    if time.time() - os.path.getmtime(p) < 86400:
+        try:
+            return pd.read_csv(p)
+        except:
+            return None
 
     return None
+
+
+def save_cache(symbol, df):
+
+    p = path(symbol)
+
+    try:
+        df.to_csv(p, index=False)
+    except:
+        pass
