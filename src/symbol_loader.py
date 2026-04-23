@@ -10,5 +10,5 @@ def load_symbols():
     df = df[df["symbol"].str.len().between(2, 4)]
     df = df[~df["symbol"].str.startswith(("E1", "FU", "CW", "C"))]
 
-    # 🔥 CHỈ GIỮ 80 MÃ (quan trọng)
-    return df.head(80)
+    # 🔥 chỉ giữ 80 mã tránh rate limit
+    return df.head(80).reset_index(drop=True)
