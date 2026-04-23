@@ -1,30 +1,23 @@
+from entry import validate_entry
+
 def backtest(df):
 
-    wins = 0
-    losses = 0
+    wins, losses = 0, 0
 
     for i in range(60, len(df)-5):
 
         sub = df.iloc[:i]
 
         ok, f = validate_entry(sub)
-
         if not ok:
             continue
 
         future = df.iloc[i:i+5]
 
-        hit_tp = future["high"].max() >= f["tp1"]
-        hit_sl = future["low"].min() <= f["sl"]
-
-        if hit_tp:
+        if future["high"].max() >= f["tp1"]:
             wins += 1
-        elif hit_sl:
+        elif future["low"].min() <= f["sl"]:
             losses += 1
 
     total = wins + losses
-
-    if total == 0:
-        return 0
-
-    return wins / total
+    return wins/total if total else 0
