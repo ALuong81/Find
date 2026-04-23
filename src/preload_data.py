@@ -84,8 +84,9 @@ def update_symbol(symbol):
 def main():
 
     df_symbols = load_symbols()
-    symbols = df_symbols["symbol"].tolist()
-
+    #symbols = df_symbols["symbol"].tolist()
+    symbols = df_symbols["symbol"].tolist()[:50]
+    
     print("🚀 PRELOAD PARALLEL:", len(symbols))
 
     success = 0
