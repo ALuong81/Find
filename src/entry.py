@@ -1,43 +1,83 @@
-from fibo import fibo
-from timeframe import resample_h1
-
 def validate_entry(df):
 
-    f = fibo(df)
+    try:
+        # =========================
+        # 1. VALIDATE DATA
+        # =========================
+        if df is None or len(df) < 60:
+            return False, None
 
-    h1 = resample_h1(df)
-    p = h1["close"].iloc[-1]
+        required = ["close", "high", "low", "volume"]
+        if not all(col in df.columns for col in required):
+            return False, None
 
-    ma20 = df["close"].rolling(20).mean().iloc[-1]
-    ma50 = df["close"].rolling(50).mean().iloc[-1]
+        close = df["close"]
+        high = df["high"]
+        low = df["low"]
+        volume = df["volume"]
 
-    vol = df["volume"].iloc[-1]
-    vol_avg = df["volume"].rolling(20).mean().iloc[-1]
+        price = close.iloc[-1]
 
-    high20 = df["high"].rolling(20).max().iloc[-2]
+        # =========================
+        # 2. TREND FILTER (QUAN TRỌNG)
+        # =========================
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ma50 = close.rolling(50).mean().iloc[-1]
+e
+        # ❌ loại cổ downtrend
+        if price < ma20 or ma20 < ma50:
+            return False, None
 
-    # 🔥 1. xu hướng
-    if ma20 < ma50:
-        return False, f
+        # =========================
+        # 3. SWING + FIBO
+        # =========================
+        swing_high = high.tail(20).max()
+        swing_low = low.tail(20).min()
 
-    # 🔥 2. breakout sớm (nới điều kiện)
-    if p > high20 * 0.98:
-        f["entry"] = p
-        f["sl"] = p * 0.95
-        f["tp1"] = p * 1.05
-        f["tp2"] = p * 1.1
-        return True, f
+        if swing_high <= swing_low:
+            return False, None
 
-    # 🔥 3. pullback linh hoạt hơn
-    if abs(p - f["entry"]) / p < 0.07:
-        return True, f
+        range_ = swing_high - swing_low
 
-    # 🔥 4. volume xác nhận
-    if vol > vol_avg * 1.3:
-        f["entry"] = p
-        f["sl"] = p * 0.94
-        f["tp1"] = p * 1.06
-        f["tp2"] = p * 1.12
-        return True, f
+        entry = swing_high - range_ * 0.382
+        entry_deep = swing_high - range_ * 0.5
 
-    return False, f
+        sl = swing_low * 0.98   # buffer SL
+
+        tp1 = swing_high
+        tp2 = swing_high + range_ * 0.618  # fib extension
+
+        # =========================
+        # 4. VOLUME CONFIRM
+        # =========================
+        vol_now = volume.iloc[-1]
+        vol_avg = volume.tail(20).mean()
+
+        if vol_avg == 0:
+            return False, None
+
+        vol_ok = vol_now >= vol_avg * 1.2
+
+        # =========================
+        # 5. ENTRY LOGIC (MỞ RỘNG)
+        # =========================
+        near_entry = (
+            (price >= entry * 0.97 and price <= entry * 1.03)
+            or
+            (price >= entry_deep * 0.97 and price <= entry_deep * 1.03)
+        )
+
+        if near_entry and vol_ok:
+
+            return True, {
+                "entry": entry,
+                "sl": sl,
+                "tp1": tp1,
+                "tp2": tp2
+            }
+
+        return False, None
+
+    except Exception as e:
+        print("ENTRY ERROR:", str(e))
+        return False, None
