@@ -3,10 +3,11 @@ logging.getLogger("vnstock").setLevel(logging.CRITICAL)
 
 from vnstock import Vnstock
 import datetime
-from cache import load_cache, save_cache
-from retry import retry
 import time
 import random
+
+from cache import load_cache, save_cache
+from retry import retry
 
 
 def is_valid_symbol(symbol):
@@ -29,7 +30,9 @@ def is_valid_symbol(symbol):
 def fetch_with_source(symbol, source, start, end):
 
     try:
-       time.sleep(random.uniform(0.3, 0.7))
+        # 🔥 delay tránh rate limit
+        time.sleep(random.uniform(0.3, 0.7))
+
         stock = Vnstock().stock(symbol=symbol, source=source)
 
         df = stock.quote.history(
@@ -64,14 +67,13 @@ def load_stock_data(symbol):
     df = None
 
     for src in sources:
-
         df = retry(lambda: fetch_with_source(symbol, src, start, end))
 
         if df is not None:
             break
 
     if df is None or df.empty:
-        raise Exception(f"{symbol} no data from all sources")
+        raise Exception(f"{symbol} no data")
 
     df = df.rename(columns={
         "time": "date",
@@ -87,10 +89,8 @@ def load_stock_data(symbol):
     return df
 
 
-# ✅ INDEX proxy
 def load_index():
 
-    # thử nhiều mã lớn để tránh fail
     for sym in ["VCB", "BID", "CTG"]:
         try:
             return load_stock_data(sym)
