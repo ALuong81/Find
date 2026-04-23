@@ -1,6 +1,3 @@
-import logging
-logging.getLogger("vnstock").setLevel(logging.CRITICAL)
-
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index
 
@@ -18,57 +15,49 @@ def main():
 
     print("🚀 START BOT")
 
-    # 1. load symbols
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    if df_symbols.empty:
-        print("❌ NO SYMBOLS")
-        return
-
-    # 2. ranking
     market = market_ranking(df_symbols, load_stock_data)
     print("RANKED:", len(market))
 
     if not market:
-        print("❌ NO MARKET DATA")
         return
 
-    top_stocks = market[:20]
-    top_sectors = sector_ranking(market)[:5]
+    # 🔥 chỉ giữ top mạnh
+    top_stocks = market[:10]
+    top_sectors = sector_ranking(market)[:3]
 
     print("TOP SECTORS:", top_sectors)
 
-    # 3. risk check
     df_index = load_index()
     risk = market_risk(df_index)
 
     print("RISK:", risk)
 
-    if risk >= 3:
-        send("🚨 MARKET RISK HIGH - STOP")
-        print("STOP DUE TO RISK")
-        return
-
-    # 4. ALWAYS SEND OVERVIEW (quan trọng)
-    msg = "📊 BOT RUNNING\n\n"
+    # luôn gửi overview
+    msg = "📊 MARKET\n\n"
 
     msg += "🔥 SECTORS:\n"
     for s, sc in top_sectors:
         msg += f"{s}: {round(sc,3)}\n"
 
     msg += "\n💪 TOP STOCKS:\n"
-    for s in top_stocks[:10]:
+    for s in top_stocks:
         msg += f"{s['symbol']} {round(s['score'],3)}\n"
 
     send(msg)
+
+    if risk >= 3:
+        send("🚨 MARKET RISK HIGH - NO TRADE")
+        return
 
     print("SCAN ENTRY...")
 
     count = 0
 
-    # 5. scan entry
-    for item in top_stocks:
+    # 🔥 chỉ lấy top 3
+    for item in top_stocks[:3]:
 
         symbol = item["symbol"]
 
@@ -76,15 +65,12 @@ def main():
             df = load_stock_data(symbol)
 
             if detect_fake_breakout(df):
-                print(symbol, "❌ fake breakout")
                 continue
 
             ok, fibo = validate_entry(df)
 
             if ok:
                 count += 1
-
-                print(symbol, "✅ SIGNAL")
 
                 send(f"""
 📈 {symbol}
@@ -95,8 +81,7 @@ TP1: {round(fibo["tp1"],2)}
 TP2: {round(fibo["tp2"],2)}
 """)
 
-        except Exception as e:
-            print(symbol, "ERROR:", e)
+        except:
             continue
 
     print("TOTAL SIGNAL:", count)
