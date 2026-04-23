@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from data_loader import load_stock_data, fetch_with_source
 from symbol_loader import load_symbols
+from liquidity_filter import rank_liquidity
 
 SAVE_DIR = "data/market"
 os.makedirs(SAVE_DIR, exist_ok=True)
@@ -84,9 +85,15 @@ def update_symbol(symbol):
 def main():
 
     df_symbols = load_symbols()
-    #symbols = df_symbols["symbol"].tolist()
-    symbols = df_symbols["symbol"].tolist()[:50]
-    
+
+    print("CALCULATE LIQUIDITY...")
+
+    df_top = rank_liquidity(df_symbols, top_n=50)
+
+    symbols = df_top["symbol"].tolist()
+
+    print("TOP LIQUIDITY:", symbols[:10])
+
     print("🚀 PRELOAD PARALLEL:", len(symbols))
 
     success = 0
