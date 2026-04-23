@@ -1,6 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 
-def parallel_map(func, items, max_workers=10):
+def parallel_map(func, items, max_workers=5):
 
     results = []
 
