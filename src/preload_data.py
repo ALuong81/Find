@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from data_loader import load_stock_data, fetch_with_source
 from symbol_loader import load_symbols
@@ -8,11 +9,11 @@ from symbol_loader import load_symbols
 SAVE_DIR = "data/market"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
+MAX_WORKERS = 5   # 🔥 chỉnh 3–6 tùy tốc độ
+
 
 def fetch_incremental(symbol, start, end):
-    """
-    🔥 thử nhiều source để tránh lỗi API
-    """
+
     for src in ["VCI", "MSN", "KBS"]:
         try:
             df = fetch_with_source(symbol, src, start, end)
@@ -24,9 +25,7 @@ def fetch_incremental(symbol, start, end):
 
 
 def normalize(df):
-    """
-    🔥 chuẩn hóa format dataframe
-    """
+
     return df.rename(columns={
         "time": "date",
         "open": "open",
@@ -41,34 +40,31 @@ def update_symbol(symbol):
 
     path = f"{SAVE_DIR}/{symbol}.csv"
 
-    # 🔥 chưa có file → load full
-    if not os.path.exists(path):
-        print("🆕 FULL LOAD:", symbol)
-        df = load_stock_data(symbol)
-        return df
-
     try:
+        if not os.path.exists(path):
+            print("🆕 FULL LOAD:", symbol)
+            df = load_stock_data(symbol)
+            return symbol, df
+
         df_old = pd.read_csv(path)
 
         if df_old.empty or "date" not in df_old.columns:
-            print("⚠️ CORRUPT FILE → RELOAD:", symbol)
-            return load_stock_data(symbol)
+            print("⚠️ CORRUPT:", symbol)
+            df = load_stock_data(symbol)
+            return symbol, df
 
         last_date = df_old["date"].iloc[-1]
 
         start = pd.to_datetime(last_date) + pd.Timedelta(days=1)
         end = datetime.date.today()
 
-        # 🔥 không có gì để update
         if start.date() > end:
-            print("⏭ SKIP (UP-TO-DATE):", symbol)
-            return df_old
+            return symbol, df_old
 
         new_df = fetch_incremental(symbol, start, end)
 
         if new_df is None or new_df.empty:
-            print("⚠️ NO NEW DATA:", symbol)
-            return df_old
+            return symbol, df_old
 
         new_df = normalize(new_df)
 
@@ -76,31 +72,33 @@ def update_symbol(symbol):
         df = df.drop_duplicates(subset=["date"])
         df = df.sort_values("date")
 
-        print("🔄 UPDATED:", symbol)
+        print("🔄", symbol)
 
-        return df
+        return symbol, df
 
     except Exception as e:
         print("❌ ERROR:", symbol)
-        return None
+        return symbol, None
 
 
 def main():
 
     df_symbols = load_symbols()
+    symbols = df_symbols["symbol"].tolist()
 
-    print("🚀 PRELOAD START")
-    print("TOTAL SYMBOLS:", len(df_symbols))
+    print("🚀 PRELOAD PARALLEL:", len(symbols))
 
     success = 0
     fail = 0
 
-    for _, row in df_symbols.iterrows():
+    # 🔥 MULTI THREAD
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
-        symbol = row["symbol"]
+        futures = [executor.submit(update_symbol, s) for s in symbols]
 
-        try:
-            df = update_symbol(symbol)
+        for future in as_completed(futures):
+
+            symbol, df = future.result()
 
             if df is not None:
                 df.to_csv(f"{SAVE_DIR}/{symbol}.csv", index=False)
@@ -108,14 +106,9 @@ def main():
             else:
                 fail += 1
 
-        except:
-            fail += 1
-            print("❌ FAIL:", symbol)
-
     print("\n===== RESULT =====")
     print("✅ SUCCESS:", success)
     print("❌ FAIL:", fail)
-    print("DONE PRELOAD")
 
 
 if __name__ == "__main__":
