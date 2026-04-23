@@ -19,12 +19,11 @@ def validate_entry(df):
         price = close.iloc[-1]
 
         # =========================
-        # 2. TREND FILTER (QUAN TRỌNG)
+        # 2. TREND FILTER
         # =========================
         ma20 = close.rolling(20).mean().iloc[-1]
         ma50 = close.rolling(50).mean().iloc[-1]
-e
-        # ❌ loại cổ downtrend
+
         if price < ma20 or ma20 < ma50:
             return False, None
 
@@ -42,10 +41,10 @@ e
         entry = swing_high - range_ * 0.382
         entry_deep = swing_high - range_ * 0.5
 
-        sl = swing_low * 0.98   # buffer SL
+        sl = swing_low * 0.98
 
         tp1 = swing_high
-        tp2 = swing_high + range_ * 0.618  # fib extension
+        tp2 = swing_high + range_ * 0.618
 
         # =========================
         # 4. VOLUME CONFIRM
@@ -59,7 +58,7 @@ e
         vol_ok = vol_now >= vol_avg * 1.2
 
         # =========================
-        # 5. ENTRY LOGIC (MỞ RỘNG)
+        # 5. ENTRY LOGIC
         # =========================
         near_entry = (
             (price >= entry * 0.97 and price <= entry * 1.03)
