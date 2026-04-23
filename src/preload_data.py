@@ -92,7 +92,7 @@ def main():
 
     symbols = df_top["symbol"].tolist()
 
-    print("TOP LIQUIDITY:", symbols[:10])
+    print("🔥 TOP MONEY FLOW:", symbols[:10])
 
     print("🚀 PRELOAD PARALLEL:", len(symbols))
 
