@@ -1,7 +1,12 @@
 from symbol_loader import load_symbols
-from data_loader import load_stock_data, load_index
+from data_loader import load_stock_data
 
-from market_ranking import market_ranking
+from smart_money import (
+    market_score,
+    sector_money_flow,
+    pick_leaders
+)
+
 from entry import validate_entry
 from tracker import log_trade
 
@@ -9,12 +14,16 @@ import os
 import requests
 
 
+# =========================
+# TELEGRAM
+# =========================
 def send_telegram(msg):
 
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
     if not token or not chat_id:
+        print("⚠️ TELEGRAM NOT CONFIG")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -25,9 +34,12 @@ def send_telegram(msg):
             "text": msg
         })
     except:
-        pass
+        print("❌ TELEGRAM ERROR")
 
 
+# =========================
+# MAIN
+# =========================
 def main():
 
     print("🚀 START BOT")
@@ -36,59 +48,86 @@ def main():
 
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    # 🔥 1. RANK THỊ TRƯỜNG
-    market = market_ranking(df_symbols, load_stock_data)
+    # =========================
+    # 1. MARKET FILTER
+    # =========================
+    m = market_score()
 
-    print("RANKED:", len(market))
+    print("MARKET SCORE:", m)
 
-    # 🔥 2. FILTER CỔ MẠNH THẬT
-    market = [m for m in market if m["score"] > 0.1]
+    if m < 0:
+        print("❌ MARKET BAD → STOP")
+        send_telegram("❌ Market xấu - dừng giao dịch")
+        return
 
-    # 🔥 sort lại cho chắc
-    market = sorted(market, key=lambda x: x["score"], reverse=True)
+    # =========================
+    # 2. SECTOR MONEY FLOW
+    # =========================
+    sector_df = sector_money_flow(df_symbols)
 
-    print("AFTER FILTER:", len(market))
+    if sector_df.empty:
+        print("❌ NO SECTOR DATA")
+        return
 
-    # 🔥 lấy top
-    top_stocks = market[:10]
+    top_sectors = sector_df.head(3)
 
-    print("TOP PICKS:", [m["symbol"] for m in top_stocks])
+    print("\n🔥 TOP SECTORS:")
+    for _, row in top_sectors.iterrows():
+        print(f"{row['sector']} | score={round(row['score'],2)}")
 
-    print("SCAN ENTRY...\n")
+    # =========================
+    # 3. PICK LEADERS
+    # =========================
+    leaders = []
+
+    for _, row in top_sectors.iterrows():
+
+        sector = row["sector"]
+
+        top_stocks = pick_leaders(df_symbols, sector)
+
+        for _, s in top_stocks.iterrows():
+            leaders.append(s["symbol"])
+
+    # remove duplicate
+    leaders = list(set(leaders))
+
+    print("\n🔥 LEADERS:", leaders)
+
+    # =========================
+    # 4. ENTRY SCAN
+    # =========================
+    print("\nSCAN ENTRY...\n")
 
     signals = []
 
-    # 🔥 3. SCAN ENTRY
-    for item in top_stocks:
-
-        symbol = item["symbol"]
-        score = round(item["score"], 3)
+    for symbol in leaders:
 
         try:
             df = load_stock_data(symbol)
 
             ok, f = validate_entry(df)
 
-            last_price = df["close"].iloc[-1]
+            price = df["close"].iloc[-1]
 
-            print(f"{symbol} | price={round(last_price,2)} | score={score}")
+            print(f"{symbol} | price={round(price,2)}")
 
             if ok:
+
                 signals.append({
                     "symbol": symbol,
                     "entry": f["entry"],
                     "sl": f["sl"],
                     "tp1": f["tp1"],
-                    "tp2": f["tp2"],
-                    "score": score
+                    "tp2": f["tp2"]
                 })
 
                 log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-                print(f"   ✅ SIGNAL")
+                print("   ✅ SIGNAL")
 
             else:
-                print(f"   ❌ skip")
+                print("   ❌ skip")
 
         except Exception as e:
             print(f"{symbol} ERROR")
@@ -96,30 +135,33 @@ def main():
 
     print("\nTOTAL SIGNAL:", len(signals))
 
-    # 🔥 4. SORT SIGNAL MẠNH NHẤT
-    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
-
-    # 🔥 5. TELEGRAM OUTPUT
+    # =========================
+    # 5. SEND TELEGRAM
+    # =========================
     if signals:
 
-        msg = "🔥 TOP SIGNALS:\n\n"
+        msg = "🔥 SMART MONEY SIGNALS\n\n"
 
         for s in signals:
 
             msg += (
-                f"{s['symbol']} (score {s['score']})\n"
+                f"{s['symbol']}\n"
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
                 f"TP2: {round(s['tp2'],2)}\n\n"
             )
 
-        print("\nSEND TELEGRAM...")
+        print("\n📩 SEND TELEGRAM")
         send_telegram(msg)
 
     else:
         print("⚠️ NO SIGNAL TODAY")
+        send_telegram("⚠️ Không có tín hiệu hôm nay")
 
 
+# =========================
+# RUN
+# =========================
 if __name__ == "__main__":
     main()
