@@ -9,7 +9,7 @@ from entry import validate_entry
 from risk import market_risk
 
 from alert import send
-
+from position import position_size
 
 def main():
 
@@ -71,7 +71,9 @@ def main():
 
             if ok:
                 count += 1
-
+                
+                size = position_size(100000000, fibo["entry"], fibo["sl"])
+                
                 send(f"""
 📈 {symbol}
 
