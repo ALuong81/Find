@@ -5,12 +5,17 @@ from vnstock import Vnstock
 import datetime
 import time
 import random
+import os
+import pandas as pd
 
 from cache import load_cache, save_cache
 from retry import retry
 
-# 🔥 cache RAM (tránh gọi lại trong cùng 1 run)
+# 🔥 cache RAM
 memory_cache = {}
+
+# 🔥 preload data dir
+MARKET_DIR = "data/market"
 
 
 def is_valid_symbol(symbol):
@@ -33,7 +38,7 @@ def is_valid_symbol(symbol):
 def fetch_with_source(symbol, source, start, end):
 
     try:
-        # 🔥 delay tránh rate limit
+        # 🔥 delay chống rate limit
         time.sleep(random.uniform(0.4, 0.8))
 
         stock = Vnstock().stock(symbol=symbol, source=source)
@@ -47,7 +52,7 @@ def fetch_with_source(symbol, source, start, end):
         if df is not None and not df.empty:
             return df
 
-    except Exception as e:
+    except:
         return None
 
     return None
@@ -58,17 +63,29 @@ def load_stock_data(symbol):
     if not is_valid_symbol(symbol):
         raise Exception(f"Invalid symbol {symbol}")
 
-    # 🔥 1. cache RAM (nhanh nhất)
+    # 🔥 1. RAM cache
     if symbol in memory_cache:
         return memory_cache[symbol]
 
-    # 🔥 2. cache file
+    # 🔥 2. preload data (QUAN TRỌNG NHẤT)
+    local_path = f"{MARKET_DIR}/{symbol}.csv"
+
+    if os.path.exists(local_path):
+        try:
+            df = pd.read_csv(local_path)
+            memory_cache[symbol] = df
+            print(f"LOAD LOCAL: {symbol}")
+            return df
+        except:
+            pass
+
+    # 🔥 3. file cache
     cached = load_cache(symbol)
     if cached is not None:
         memory_cache[symbol] = cached
         return cached
 
-    # 🔥 3. gọi API
+    # 🔥 4. fallback API
     end = datetime.date.today()
     start = end - datetime.timedelta(days=200)
 
@@ -96,10 +113,10 @@ def load_stock_data(symbol):
         "volume": "volume"
     })
 
-    # 🔥 lưu cache
+    # 🔥 save cache
     save_cache(symbol, df)
 
-    # 🔥 lưu RAM
+    # 🔥 save RAM
     memory_cache[symbol] = df
 
     return df
@@ -107,7 +124,7 @@ def load_stock_data(symbol):
 
 def load_index():
 
-    # dùng cổ bank làm proxy thị trường
+    # dùng cổ bank làm proxy
     for sym in ["VCB", "BID", "CTG"]:
         try:
             return load_stock_data(sym)
