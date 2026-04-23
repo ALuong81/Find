@@ -130,7 +130,7 @@ def main():
                 print("   ❌ skip")
 
         except Exception as e:
-            print(f"{symbol} ERROR")
+            print(f"{symbol} ERROR: {str(e)}")
             continue
 
     print("\nTOTAL SIGNAL:", len(signals))
