@@ -81,6 +81,7 @@ Entry: {round(fibo["entry"],2)}
 SL: {round(fibo["sl"],2)}
 TP1: {round(fibo["tp1"],2)}
 TP2: {round(fibo["tp2"],2)}
+Size: {size} cp
 """)
 
         except:
