@@ -1,42 +1,43 @@
-from symbol_loader import load_symbols
-from data_loader import load_stock_data, load_index
+from fibo import fibo
+from timeframe import resample_h1
 
-from market_ranking import market_ranking
-from entry import validate_entry
-from tracker import log_trade
+def validate_entry(df):
 
-def main():
+    f = fibo(df)
 
-    print("🚀 START BOT")
+    h1 = resample_h1(df)
+    p = h1["close"].iloc[-1]
 
-    df_symbols = load_symbols()
+    ma20 = df["close"].rolling(20).mean().iloc[-1]
+    ma50 = df["close"].rolling(50).mean().iloc[-1]
 
-    market = market_ranking(df_symbols, load_stock_data)[:10]
+    vol = df["volume"].iloc[-1]
+    vol_avg = df["volume"].rolling(20).mean().iloc[-1]
 
-    print("SCAN ENTRY...")
+    high20 = df["high"].rolling(20).max().iloc[-2]
 
-    count = 0
+    # 🔥 1. xu hướng
+    if ma20 < ma50:
+        return False, f
 
-    for item in market[:5]:
+    # 🔥 2. breakout sớm (nới điều kiện)
+    if p > high20 * 0.98:
+        f["entry"] = p
+        f["sl"] = p * 0.95
+        f["tp1"] = p * 1.05
+        f["tp2"] = p * 1.1
+        return True, f
 
-        symbol = item["symbol"]
+    # 🔥 3. pullback linh hoạt hơn
+    if abs(p - f["entry"]) / p < 0.07:
+        return True, f
 
-        try:
-            df = load_stock_data(symbol)
+    # 🔥 4. volume xác nhận
+    if vol > vol_avg * 1.3:
+        f["entry"] = p
+        f["sl"] = p * 0.94
+        f["tp1"] = p * 1.06
+        f["tp2"] = p * 1.12
+        return True, f
 
-            ok, f = validate_entry(df)
-
-            if ok:
-                count += 1
-
-                log_trade(symbol, f["entry"], f["sl"], f["tp1"])
-
-                print(symbol, "✅")
-
-        except:
-            continue
-
-    print("TOTAL SIGNAL:", count)
-
-if __name__ == "__main__":
-    main()
+    return False, f
