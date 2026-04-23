@@ -5,6 +5,8 @@ from vnstock import Vnstock
 import datetime
 from cache import load_cache, save_cache
 from retry import retry
+import time
+import random
 
 
 def is_valid_symbol(symbol):
@@ -27,6 +29,7 @@ def is_valid_symbol(symbol):
 def fetch_with_source(symbol, source, start, end):
 
     try:
+       time.sleep(random.uniform(0.3, 0.7))
         stock = Vnstock().stock(symbol=symbol, source=source)
 
         df = stock.quote.history(
