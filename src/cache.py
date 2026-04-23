@@ -3,13 +3,10 @@ import pandas as pd
 import time
 
 CACHE_DIR = "data/cache"
-
 os.makedirs(CACHE_DIR, exist_ok=True)
-
 
 def path(symbol):
     return f"{CACHE_DIR}/{symbol}.csv"
-
 
 def load_cache(symbol):
 
@@ -18,9 +15,10 @@ def load_cache(symbol):
     if not os.path.exists(p):
         return None
 
-    # 🔥 cache < 1 ngày thì dùng
+    # cache < 1 ngày
     if time.time() - os.path.getmtime(p) < 86400:
         try:
+            print(f"LOAD CACHE: {symbol}")
             return pd.read_csv(p)
         except:
             return None
