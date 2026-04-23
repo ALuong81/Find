@@ -1,23 +1,19 @@
-def fibo(df):
-
-    h = df["high"].rolling(20).max().iloc[-1]
-    l = df["low"].rolling(20).min().iloc[-1]
-
-    d = h - l
-
-    return {
-        "entry": h - 0.382*d,
-        "sl": l,
-        "tp1": h + 0.618*d,
-        "tp2": h + d
-    }
+from fibo import fibo
 
 def validate_entry(df):
 
     f = fibo(df)
     p = df["close"].iloc[-1]
 
-    if abs(p - f["entry"]) / p < 0.03:
+    ma20 = df["close"].rolling(20).mean().iloc[-1]
+    ma50 = df["close"].rolling(50).mean().iloc[-1]
+
+    # chỉ trade uptrend
+    if ma20 < ma50:
+        return False, f
+
+    # gần vùng entry
+    if abs(p - f["entry"]) / p < 0.025:
         return True, f
 
     return False, f
