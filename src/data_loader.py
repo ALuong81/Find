@@ -37,7 +37,7 @@ def load_stock_data(symbol):
     start = end - datetime.timedelta(days=200)
 
     try:
-        stock = Vnstock().stock(symbol=symbol, source="SSI")
+        stock = Vnstock().stock(symbol=symbol, source="VCI")
 
         df = retry(lambda: stock.quote.history(
             start=str(start),
@@ -65,6 +65,5 @@ def load_stock_data(symbol):
         raise Exception(f"{symbol} load error: {str(e)}")
 
 
-# ✅ INDEX PROXY (tránh lỗi VNINDEX)
 def load_index():
     return load_stock_data("VCB")
