@@ -18,7 +18,9 @@ def main():
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    market = market_ranking(df_symbols, load_stock_data)
+    #market = market_ranking(df_symbols, load_stock_data)
+    # 🔥 chỉ ranking 40 → lấy top 15
+    market = market_ranking(df_symbols, load_stock_data)[:15]
     print("RANKED:", len(market))
 
     if not market:
