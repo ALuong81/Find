@@ -57,7 +57,7 @@ def main():
     count = 0
 
     # 🔥 chỉ lấy top 3
-    for item in top_stocks[:3]:
+    for item in top_stocks[:5]:
 
         symbol = item["symbol"]
 
