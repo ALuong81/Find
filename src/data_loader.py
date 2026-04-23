@@ -7,7 +7,7 @@ import time
 import random
 
 from cache import load_cache, save_cache
-
+from retry import retry
 
 def is_valid_symbol(symbol):
 
@@ -65,7 +65,8 @@ def load_stock_data(symbol):
     df = None
 
     for src in sources:
-        df = fetch_with_source(symbol, src, start, end)
+        #df = fetch_with_source(symbol, src, start, end)
+        df = retry(lambda: fetch_with_source(symbol, src, start, end)) 
         if df is not None:
             break
 
