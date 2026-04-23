@@ -24,6 +24,26 @@ def is_valid_symbol(symbol):
     return True
 
 
+def fetch_with_source(symbol, source, start, end):
+
+    try:
+        stock = Vnstock().stock(symbol=symbol, source=source)
+
+        df = stock.quote.history(
+            start=str(start),
+            end=str(end),
+            interval="1D"
+        )
+
+        if df is not None and not df.empty:
+            return df
+
+    except:
+        return None
+
+    return None
+
+
 def load_stock_data(symbol):
 
     if not is_valid_symbol(symbol):
@@ -36,34 +56,42 @@ def load_stock_data(symbol):
     end = datetime.date.today()
     start = end - datetime.timedelta(days=200)
 
-    try:
-        stock = Vnstock().stock(symbol=symbol, source="VCI")
+    sources = ["VCI", "MSN", "KBS"]
 
-        df = retry(lambda: stock.quote.history(
-            start=str(start),
-            end=str(end),
-            interval="1D"
-        ))
+    df = None
 
-        if df is None or df.empty:
-            raise Exception(f"No data {symbol}")
+    for src in sources:
 
-        df = df.rename(columns={
-            "time": "date",
-            "open": "open",
-            "high": "high",
-            "low": "low",
-            "close": "close",
-            "volume": "volume"
-        })
+        df = retry(lambda: fetch_with_source(symbol, src, start, end))
 
-        save_cache(symbol, df)
+        if df is not None:
+            break
 
-        return df
+    if df is None or df.empty:
+        raise Exception(f"{symbol} no data from all sources")
 
-    except Exception as e:
-        raise Exception(f"{symbol} load error: {str(e)}")
+    df = df.rename(columns={
+        "time": "date",
+        "open": "open",
+        "high": "high",
+        "low": "low",
+        "close": "close",
+        "volume": "volume"
+    })
+
+    save_cache(symbol, df)
+
+    return df
 
 
+# ✅ INDEX proxy
 def load_index():
-    return load_stock_data("VCB")
+
+    # thử nhiều mã lớn để tránh fail
+    for sym in ["VCB", "BID", "CTG"]:
+        try:
+            return load_stock_data(sym)
+        except:
+            continue
+
+    raise Exception("Cannot load index proxy")
