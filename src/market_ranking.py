@@ -5,27 +5,23 @@ from data_loader import load_index
 
 def process(row, load_stock_data, df_index):
 
-    symbol = row["symbol"]
-    sector = row["sector"]
-
     try:
-        df = load_stock_data(symbol)
+        df = load_stock_data(row["symbol"])
 
         ret = df["close"].pct_change(20).iloc[-1]
         vol = df["volume"].iloc[-1] / df["volume"].rolling(20).mean().iloc[-1]
         rs = relative_strength(df, df_index)
 
-        score = ret * 0.4 + rs * 0.4 + vol * 0.2
+        score = ret*0.4 + rs*0.4 + vol*0.2
 
         return {
-            "symbol": symbol,
-            "sector": sector,
+            "symbol": row["symbol"],
+            "sector": row["sector"],
             "score": score
         }
 
     except:
         return None
-
 
 def market_ranking(df_symbols, load_stock_data):
 
