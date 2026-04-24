@@ -9,7 +9,9 @@ from smart_money import (
 
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
+from breakout import breakout_type
 from entry import validate_entry
+from voe import voe_score
 from tracker import log_trade
 
 import os
@@ -40,34 +42,6 @@ def send_telegram(msg):
 
 
 # =========================
-# VOE SCORE
-# =========================
-def voe_score(df, df_index):
-
-    try:
-        close = df["close"]
-        vol = df["volume"]
-
-        # EDGE (RS)
-        rs = relative_strength(df, df_index)
-
-        # MOMENTUM
-        momentum = close.pct_change(10).iloc[-1]
-
-        # VOLUME
-        vol_ma = vol.rolling(20).mean()
-        vol_score = vol.iloc[-1] / vol_ma.iloc[-1]
-
-        # FINAL SCORE
-        score = rs * 0.5 + momentum * 0.3 + vol_score * 0.2
-
-        return score
-
-    except:
-        return -999
-
-
-# =========================
 # MAIN
 # =========================
 def main():
@@ -77,9 +51,7 @@ def main():
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    # =========================
-    # 1. MARKET
-    # =========================
+    # MARKET
     m = market_score()
     print("MARKET SCORE:", m)
 
@@ -87,9 +59,7 @@ def main():
         print("❌ MARKET BAD")
         return
 
-    # =========================
-    # 2. SECTOR ROTATION
-    # =========================
+    # SECTOR
     sector_df = sector_money_flow(df_symbols)
     sector_df = sector_rotation(sector_df)
 
@@ -99,15 +69,11 @@ def main():
     for _, row in top_sectors.iterrows():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
-    # =========================
-    # 3. PICK LEADERS
-    # =========================
+    # LEADERS
     leaders = []
 
     for _, row in top_sectors.iterrows():
-        sector = row["sector"]
-        stocks = pick_leaders(df_symbols, sector)
-
+        stocks = pick_leaders(df_symbols, row["sector"])
         for _, s in stocks.iterrows():
             leaders.append(s["symbol"])
 
@@ -115,38 +81,25 @@ def main():
 
     print("\n🔥 RAW LEADERS:", leaders)
 
-    # =========================
-    # 4. RS + VOE FILTER
-    # =========================
+    # RS + VOE FILTER
     df_index = load_index()
 
     scored = []
 
     for symbol in leaders:
-
         df = load_stock_data(symbol)
-        if df is None:
-            continue
-
         rs = relative_strength(df, df_index)
 
-        # 🔥 giữ cả cổ đang tích lũy
         if rs > -0.02:
-
             score = voe_score(df, df_index)
-
             scored.append((symbol, score))
 
-    # 🔥 sort theo VOE
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
+    leaders = [s[0] for s in scored[:5]]
 
-    leaders = [x[0] for x in scored[:5]]
+    print("\n🔥 STRONG LEADERS:", leaders)
 
-    print("\n🔥 VOE LEADERS:", leaders)
-
-    # =========================
-    # 5. ENTRY
-    # =========================
+    # ENTRY
     print("\nSCAN ENTRY...\n")
 
     signals = []
@@ -157,13 +110,32 @@ def main():
             df = load_stock_data(symbol)
             price = df["close"].iloc[-1]
 
+            b_type = breakout_type(df)
+            rs = relative_strength(df, df_index)
+
+            if b_type is None:
+                continue
+
+            # ❌ loại STRONG yếu
+            if b_type == "STRONG":
+                vol = df["volume"]
+                vol_ma = vol.rolling(20).mean()
+
+                if vol.iloc[-1] < vol_ma.iloc[-1] * 1.5 or rs < 0:
+                    print(f"{symbol} | ❌ weak strong")
+                    continue
+
             ok, f = validate_entry(df)
 
-            print(f"{symbol} | price={round(price,2)}")
+            print(f"{symbol} | price={round(price,2)} | breakout={b_type}")
 
             if ok:
 
                 rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
+
+                score = rr
+                if b_type == "EARLY":
+                    score *= 1.3
 
                 signals.append({
                     "symbol": symbol,
@@ -171,7 +143,9 @@ def main():
                     "sl": f["sl"],
                     "tp1": f["tp1"],
                     "tp2": f["tp2"],
-                    "rr": rr
+                    "rr": rr,
+                    "type": b_type,
+                    "score": score
                 })
 
                 log_trade(symbol, f["entry"], f["sl"], f["tp1"])
@@ -184,18 +158,18 @@ def main():
         except Exception as e:
             print(f"{symbol} ERROR:", str(e))
 
+    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+
     print("\nTOTAL SIGNAL:", len(signals))
 
-    # =========================
-    # 6. TELEGRAM
-    # =========================
+    # TELEGRAM
     if signals:
 
         msg = "🔥 SMART MONEY SIGNALS\n\n"
 
         for s in signals:
             msg += (
-                f"{s['symbol']}\n"
+                f"{s['symbol']} ({s['type']})\n"
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
