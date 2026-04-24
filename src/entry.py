@@ -4,9 +4,7 @@ from breakout import early_breakout
 def validate_entry(df):
 
     try:
-        # =========================
-        # 1. CHECK DATA
-        # =========================
+        # ========= DATA CHECK =========
         if df is None or len(df) < 50:
             print("DEBUG: not enough data")
             return False, None
@@ -22,16 +20,12 @@ def validate_entry(df):
 
         price = close.iloc[-1]
 
-        # =========================
-        # 2. BREAKOUT FILTER
-        # =========================
+        # ========= BREAKOUT =========
         if not early_breakout(df):
             print("DEBUG: no breakout")
             return False, None
 
-        # =========================
-        # 3. SWING + FIBO
-        # =========================
+        # ========= SWING =========
         swing_high = high.tail(20).max()
         swing_low = low.tail(20).min()
 
@@ -39,32 +33,28 @@ def validate_entry(df):
             print("DEBUG: invalid swing")
             return False, None
 
-        # fibo 0.382
+        # ========= FIBO =========
         entry = swing_high - (swing_high - swing_low) * 0.382
         sl = swing_low
         tp1 = swing_high
         tp2 = swing_high * 1.1
 
-        # =========================
-        # 4. ENTRY RANGE (ĐÃ NỚI)
-        # =========================
         lower = entry * 0.95
         upper = entry * 1.05
 
         print(f"DEBUG: price={round(price,2)} | entry={round(entry,2)}")
 
         if lower <= price <= upper:
-
             return True, {
-                "entry": entry,
-                "sl": sl,
-                "tp1": tp1,
-                "tp2": tp2
+                "entry": round(entry, 2),
+                "sl": round(sl, 2),
+                "tp1": round(tp1, 2),
+                "tp2": round(tp2, 2)
             }
 
         print("DEBUG: price not in entry zone")
         return False, None
 
     except Exception as e:
-        print("ENTRY ERROR:", str(e))
+        print("ENTRY ERROR:", e)
         return False, None
