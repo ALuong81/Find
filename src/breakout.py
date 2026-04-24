@@ -1,21 +1,3 @@
-def breakout_type(df):
-
-    high = df["high"]
-    close = df["close"]
-    vol = df["volume"]
-
-    resistance = high.tail(20).max()
-    price = close.iloc[-1]
-    vol_ma = vol.rolling(20).mean()
-
-    if price >= resistance * 0.95 and vol.iloc[-1] > vol_ma.iloc[-1] * 1.2:
-        return "STRONG"
-
-    if price >= resistance * 0.90:
-        return "EARLY"
-
-    return None
-
 def early_breakout(df):
 
     try:
@@ -48,3 +30,21 @@ def early_breakout(df):
     except Exception as e:
         print("BREAKOUT ERROR:", e)
         return False
+
+def breakout_type(df):
+
+    high = df["high"]
+    close = df["close"]
+    vol = df["volume"]
+
+    resistance = high.tail(20).max()
+    price = close.iloc[-1]
+    vol_ma = vol.rolling(20).mean()
+
+    if price >= resistance * 0.95 and vol.iloc[-1] > vol_ma.iloc[-1] * 1.2:
+        return "STRONG"
+
+    if price >= resistance * 0.90:
+        return "EARLY"
+
+    return None
