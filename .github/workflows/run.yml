@@ -3,7 +3,7 @@ name: Find Bot
 on:
   schedule:
     - cron: "0 2 * * 1-5"   # preload sáng
-    - cron: "0 3 * * 1-5"  # run bot
+    - cron: "0 3 * * 1-5"   # run bot
   workflow_dispatch:
 
 jobs:
@@ -39,7 +39,23 @@ jobs:
       - uses: actions/checkout@v3
 
       - name: Install
-        run: pip install vnstock pandas
+        run: pip install vnstock pandas requests
 
+      # 🔥 tạo folder log
+      - name: Create log folder
+        run: mkdir -p logs
+
+      # 🚀 RUN BOT + TELEGRAM + LOG
       - name: Run bot
-        run: python src/main.py
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          python src/main.py 2>&1 | tee logs/run.log
+
+      # 💾 lưu log để debug
+      - name: Upload log
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-log
+          path: logs/run.log
