@@ -30,7 +30,7 @@ def validate_entry(df):
 
         price = close.iloc[-1]
 
-        if entry * 0.98 <= price <= entry * 1.02:
+        if entry * 0.95 <= price <= entry * 1.05:
 
             return True, {
                 "entry": entry,
