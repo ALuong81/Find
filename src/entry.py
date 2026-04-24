@@ -2,6 +2,7 @@ from breakout import breakout_type
 from accumulation import detect_accumulation
 from money_flow import money_flow_score
 from institutional import institutional_score
+from flow_timeline import flow_timeline
 
 
 def validate_entry(df):
@@ -33,16 +34,17 @@ def validate_entry(df):
         price = close.iloc[-1]
 
         # =========================
-        # 🔥 SMART FILTER
+        # 🔥 SMART FILTER (GIỮ NGUYÊN + NÂNG)
         # =========================
         flow = money_flow_score(df)
         inst = institutional_score(df)
+        flow_acc = flow_timeline(df)
 
-        if flow == 0:
+        if flow <= 0:
             print("DEBUG: no money flow")
             return False, None
 
-        if inst == 0:
+        if inst <= 0:
             print("DEBUG: no institution")
             return False, None
 
@@ -50,7 +52,7 @@ def validate_entry(df):
         # 🔥 ENTRY LOGIC
         # =========================
 
-        # PRE breakout → vào sớm (NHƯNG phải tích lũy + không quá xa)
+        # PRE → vào sớm nhất (ưu tiên cao nhất)
         if b_type == "PRE":
 
             if not detect_accumulation(df):
@@ -62,6 +64,10 @@ def validate_entry(df):
                 print("DEBUG: chasing price")
                 return False, None
 
+            # 🔥 boost nếu dòng tiền tăng tốc
+            if flow_acc > 0.5:
+                tp2 = swing_high * 1.15
+
             return True, {
                 "entry": price,
                 "sl": sl,
@@ -72,24 +78,33 @@ def validate_entry(df):
                 "inst": inst
             }
 
-        # EARLY → vùng pullback đẹp nhất
+        # EARLY → vùng đẹp nhất
         if b_type == "EARLY":
 
-            if entry * 0.97 <= price <= entry * 1.03:
-                return True, {
-                    "entry": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "EARLY",
-                    "flow": flow,
-                    "inst": inst
-                }
+            if entry * 0.95 <= price <= entry * 1.05:
+
+                # 🔥 nếu có accumulation → ưu tiên
+                if detect_accumulation(df) or flow_acc > 0.3:
+                    return True, {
+                        "entry": entry,
+                        "sl": sl,
+                        "tp1": tp1,
+                        "tp2": tp2,
+                        "type": "EARLY",
+                        "flow": flow,
+                        "inst": inst
+                    }
 
         # STRONG → breakout xác nhận
         if b_type == "STRONG":
 
             if entry * 0.98 <= price <= entry * 1.02:
+
+                # 🔥 tránh breakout yếu
+                if flow_acc < 0.2:
+                    print("DEBUG: weak breakout")
+                    return False, None
+
                 return True, {
                     "entry": entry,
                     "sl": sl,
