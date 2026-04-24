@@ -134,8 +134,12 @@ def main():
                 rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
                 score = rr
-                if b_type == "EARLY":
+                if b_type == "PRE":
+                    score *= 1.5   # 🔥 cao nhất
+                elif b_type == "EARLY":
                     score *= 1.3
+                elif b_type == "STRONG":
+                    score *= 1.0
 
                 signals.append({
                     "symbol": symbol,
