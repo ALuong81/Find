@@ -9,20 +9,24 @@ from smart_money import (
 
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
+from breakout import breakout_type
+from entry import validate_entry
 from voe import voe_score
 from accumulation import detect_accumulation
 
 from institutional import institutional_score
 from money_flow import money_flow_score
-from flow_timeline import flow_timeline
+from flow_timeline import flow_timeline  # 🔥 NEW (add only)
 
-from entry import validate_entry
 from tracker import log_trade
 
 import os
 import requests
 
 
+# =========================
+# TELEGRAM
+# =========================
 def send_telegram(msg):
 
     token = os.getenv("TELEGRAM_TOKEN")
@@ -43,6 +47,9 @@ def send_telegram(msg):
         print("❌ TELEGRAM ERROR:", str(e))
 
 
+# =========================
+# MAIN
+# =========================
 def main():
 
     print("🚀 START BOT")
@@ -87,14 +94,13 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # SMART FILTER
+    # RS + SMART MONEY FILTER (GIỮ NGUYÊN + ADD)
     # =========================
     df_index = load_index()
 
     scored = []
 
     for symbol in leaders:
-
         try:
             df = load_stock_data(symbol)
 
@@ -103,8 +109,11 @@ def main():
             inst = institutional_score(df)
             mf = money_flow_score(df)
             acc = detect_accumulation(df)
+
+            # 🔥 NEW (additive only)
             flow_acc = flow_timeline(df)
 
+            # 🔥 filter mềm giữ nguyên
             if rs > -0.05:
 
                 score = (
@@ -112,23 +121,26 @@ def main():
                     voe * 1.5 +
                     inst * 1.5 +
                     mf * 1.2 +
-                    flow_acc * 1.5 +   # 🔥 thêm dòng tiền tăng tốc
                     (1 if acc else 0)
                 )
 
+                # 🔥 ADD (không phá logic cũ)
+                score += flow_acc * 1.0
+
                 scored.append((symbol, score))
 
-        except:
+        except Exception as e:
+            print(symbol, "FILTER ERROR:", str(e))
             continue
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # fallback
+    # fallback giữ nguyên
     if not scored:
         print("⚠️ NO STRONG LEADER → fallback")
-        leaders = leaders[:10]
+        leaders = leaders[:8]
     else:
-        leaders = [s[0] for s in scored[:10]]
+        leaders = [s[0] for s in scored[:8]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
@@ -155,10 +167,13 @@ def main():
 
                 score = rr
 
+                # 🔥 giữ nguyên weighting
                 if f["type"] == "PRE":
                     score *= 1.6
                 elif f["type"] == "EARLY":
                     score *= 1.3
+                elif f["type"] == "PULLBACK":
+                    score *= 1.2
                 elif f["type"] == "STRONG":
                     score *= 1.0
 
