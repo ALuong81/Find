@@ -24,6 +24,7 @@ def validate_entry(df):
         ma20 = close.rolling(20).mean().iloc[-1]
         ma50 = close.rolling(50).mean().iloc[-1]
 
+        # chỉ trade uptrend
         if price < ma20 or ma20 < ma50:
             return False, None
 
@@ -47,7 +48,7 @@ def validate_entry(df):
         tp2 = swing_high + range_ * 0.618
 
         # =========================
-        # 4. VOLUME CONFIRM
+        # 4. VOLUME
         # =========================
         vol_now = volume.iloc[-1]
         vol_avg = volume.tail(20).mean()
@@ -55,18 +56,25 @@ def validate_entry(df):
         if vol_avg == 0:
             return False, None
 
-        vol_ok = vol_now >= vol_avg * 1.2
+        # 🔥 giảm độ khó
+        vol_ok = vol_now >= vol_avg * 0.8
 
         # =========================
         # 5. ENTRY LOGIC
         # =========================
         near_entry = (
-            (price >= entry * 0.97 and price <= entry * 1.03)
+            (price >= entry * 0.95 and price <= entry * 1.05)
             or
-            (price >= entry_deep * 0.97 and price <= entry_deep * 1.03)
+            (price >= entry_deep * 0.95 and price <= entry_deep * 1.05)
         )
 
-        if near_entry and vol_ok:
+        # 🔥 breakout (bắt cổ mạnh)
+        breakout = price > swing_high * 1.01
+
+        # =========================
+        # 6. FINAL SIGNAL
+        # =========================
+        if (near_entry or breakout) and vol_ok:
 
             return True, {
                 "entry": entry,
@@ -74,6 +82,15 @@ def validate_entry(df):
                 "tp1": tp1,
                 "tp2": tp2
             }
+
+        # =========================
+        # DEBUG (QUAN TRỌNG)
+        # =========================
+        print(
+            f"SKIP | price={price:.2f} "
+            f"| entry={entry:.2f} "
+            f"| vol={vol_now/vol_avg:.2f}"
+        )
 
         return False, None
 
