@@ -98,7 +98,7 @@ def main():
         df = load_stock_data(symbol)
         rs = relative_strength(df, df_index)
 
-        if rs > 0:
+        if rs > -0.02:
             filtered.append(symbol)
 
     leaders = filtered
