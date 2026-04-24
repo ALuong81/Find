@@ -40,6 +40,34 @@ def send_telegram(msg):
 
 
 # =========================
+# VOE SCORE
+# =========================
+def voe_score(df, df_index):
+
+    try:
+        close = df["close"]
+        vol = df["volume"]
+
+        # EDGE (RS)
+        rs = relative_strength(df, df_index)
+
+        # MOMENTUM
+        momentum = close.pct_change(10).iloc[-1]
+
+        # VOLUME
+        vol_ma = vol.rolling(20).mean()
+        vol_score = vol.iloc[-1] / vol_ma.iloc[-1]
+
+        # FINAL SCORE
+        score = rs * 0.5 + momentum * 0.3 + vol_score * 0.2
+
+        return score
+
+    except:
+        return -999
+
+
+# =========================
 # MAIN
 # =========================
 def main():
@@ -88,22 +116,33 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 4. RS FILTER
+    # 4. RS + VOE FILTER
     # =========================
     df_index = load_index()
 
-    filtered = []
+    scored = []
 
     for symbol in leaders:
+
         df = load_stock_data(symbol)
+        if df is None:
+            continue
+
         rs = relative_strength(df, df_index)
 
+        # 🔥 giữ cả cổ đang tích lũy
         if rs > -0.02:
-            filtered.append(symbol)
 
-    leaders = filtered
+            score = voe_score(df, df_index)
 
-    print("\n🔥 STRONG LEADERS:", leaders)
+            scored.append((symbol, score))
+
+    # 🔥 sort theo VOE
+    scored = sorted(scored, key=lambda x: x[1], reverse=True)
+
+    leaders = [x[0] for x in scored[:5]]
+
+    print("\n🔥 VOE LEADERS:", leaders)
 
     # =========================
     # 5. ENTRY
