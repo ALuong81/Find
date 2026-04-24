@@ -12,10 +12,10 @@ def early_breakout(df):
 
     # 🔥 volume tăng
     vol_ma = vol.rolling(20).mean()
-    vol_spike = vol.iloc[-1] > vol_ma.iloc[-1] * 1.3
+    vol_spike = vol.iloc[-1] > vol_ma.iloc[-1] * 1.1
 
     # 🔥 giá tiến sát kháng cự
     price = close.iloc[-1]
-    near_break = price >= resistance * 0.95
+    near_break = price >= resistance * 0.93
 
     return near_break and vol_spike
