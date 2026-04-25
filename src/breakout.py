@@ -42,13 +42,13 @@ def breakout_type(df):
     vol_ma = vol.rolling(20).mean()
 
     # 🔥 PRE-BREAKOUT (QUAN TRỌNG NHẤT)
-    if price >= resistance * 0.85 and price < resistance * 0.95:
+    if price >= resistance * 0.80 and price < resistance * 0.95:
         return "PRE"
 
     if price >= resistance * 0.95 and vol.iloc[-1] > vol_ma.iloc[-1] * 1.2:
         return "STRONG"
 
-    if price >= resistance * 0.90:
+    if price >= resistance * 0.88:
         return "EARLY"
 
     return None
