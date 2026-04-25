@@ -74,6 +74,23 @@ def load_stock_data(symbol):
 
     return df
 
+def load_stock_data_h1(symbol):
+
+    try:
+        from vnstock import stock_historical_data
+
+        df = stock_historical_data(
+            symbol=symbol,
+            resolution="60",   # 🔥 H1
+            start_date="2024-01-01",
+            end_date=None
+        )
+
+        return df
+
+    except:
+        return None
+        
 def load_index():
     for s in ["VCB","BID","CTG"]:
         try:
