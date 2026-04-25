@@ -1,6 +1,5 @@
 from symbol_loader import load_symbols
-from data_loader import load_stock_data_h1, load_stock_data, load_index
-from mtf_confirm import mtf_confirm
+from data_loader import load_stock_data, load_index, load_stock_data_h1
 
 from smart_money import (
     market_score,
@@ -19,11 +18,12 @@ from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 from market_mode import get_market_mode
 
+from mtf_confirm import mtf_confirm
+
 from tracker import log_trade
 
 import os
 import requests
-import datetime
 
 
 # =========================
@@ -50,34 +50,18 @@ def send_telegram(msg):
 
 
 # =========================
-# SESSION DETECT
-# =========================
-def get_session():
-
-    hour = datetime.datetime.utcnow().hour + 7
-
-    if hour < 11:
-        return "MORNING"
-    elif hour < 14:
-        return "MID"
-    else:
-        return "CLOSE"
-
-
-# =========================
 # MAIN
 # =========================
 def main():
 
     print("🚀 START BOT")
 
-    session = get_session()
-    print("🕒 SESSION:", session)
-
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    # ===== MARKET =====
+    # =========================
+    # MARKET
+    # =========================
     m = market_score()
     print("MARKET SCORE:", m)
 
@@ -88,7 +72,9 @@ def main():
         print("❌ MARKET OFF")
         return
 
-    # ===== SECTOR =====
+    # =========================
+    # SECTOR
+    # =========================
     sector_df = sector_money_flow(df_symbols)
     sector_df = sector_rotation(sector_df)
 
@@ -98,7 +84,9 @@ def main():
     for _, row in top_sectors.iterrows():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
-    # ===== LEADERS =====
+    # =========================
+    # LEADERS
+    # =========================
     leaders = []
 
     for _, row in top_sectors.iterrows():
@@ -109,7 +97,9 @@ def main():
     leaders = list(set(leaders))
     print("\n🔥 RAW LEADERS:", leaders)
 
-    # ===== FILTER =====
+    # =========================
+    # FILTER (SMART MONEY)
+    # =========================
     df_index = load_index()
     scored = []
 
@@ -124,11 +114,9 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # 🔥 dynamic RS theo MODE + SESSION
+            # 🔥 AUTO MODE FILTER
             if mode == "SAFE":
-                rs_cond = rs > -0.02
-            elif session == "MORNING":
-                rs_cond = rs > -0.05
+                rs_cond = rs > -0.03
             else:
                 rs_cond = rs > -0.08
 
@@ -142,14 +130,7 @@ def main():
                     (1 if acc else 0)
                 )
 
-                # 🔥 boost dòng tiền tích lũy nhiều ngày
-                score += flow_acc * 1.2
-
-                # 🔥 session boost
-                if session == "MORNING":
-                    score *= 1.1
-                elif session == "CLOSE":
-                    score *= 1.2
+                score += flow_acc * 1.0
 
                 scored.append((symbol, score))
 
@@ -160,16 +141,19 @@ def main():
 
     # fallback
     if not scored:
+        print("⚠️ NO STRONG LEADER → fallback")
         leaders = leaders[:10]
     else:
         if mode == "SAFE":
-            leaders = [s[0] for s in scored[:8]]
+            leaders = [s[0] for s in scored[:10]]
         else:
             leaders = [s[0] for s in scored[:15]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
-    # ===== ENTRY =====
+    # =========================
+    # ENTRY
+    # =========================
     print("\nSCAN ENTRY...\n")
 
     signals = []
@@ -180,55 +164,43 @@ def main():
             df = load_stock_data(symbol)
             price = df["close"].iloc[-1]
 
-            ok, f = validate_entry(df)
+            ok, f = validate_entry(df, symbol)
 
-            # =========================
-            # 🔥 MTF CONFIRM (lọc fake breakout)
-            # =========================
-             if ok:
-                 df_h1 = load_stock_data_h1(symbol)
-                 if not mtf_confirm(df, df_h1):
-                     print("   ❌ MTF FAIL")
-                     continue
-        
             print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
 
             if ok:
-                # SAFE mode → bắt buộc MTF
-                if mode == "SAFE":
-                    if not mtf_confirm(df, df_h1):
-                        continue
-                # AGGRESSIVE → cho pass nếu PRE
-                elif mode == "AGGRESSIVE":
-                     if f["type"] != "PRE":
-                         if not mtf_confirm(df, df_h1):
-                             continue
 
-                # 🔥 tránh mua đuổi (AGGRESSIVE)
+                df_h1 = load_stock_data_h1(symbol)
+
+                # =========================
+                # 🔥 MTF CONFIRM (lọc fake)
+                # =========================
+                if f["type"] in ["EARLY_BREAKOUT", "PRE", "EARLY"]:
+                    if not mtf_confirm(df, df_h1):
+                        print("   ❌ MTF FAIL")
+                        continue
+
+                # =========================
+                # 🔥 AGGRESSIVE MODE FILTER
+                # =========================
                 if mode == "AGGRESSIVE":
-                    if abs(price - f["entry"]) / f["entry"] > 0.08:
+                    if abs(price - f["entry"]) / f["entry"] > 0.07:
                         print("   ❌ too far")
                         continue
 
                 rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
-                # 🔥 loại RR quá thấp
-                if rr < 1.2:
-                    print("   ❌ low RR")
-                    continue
-
                 score = rr
 
-                # 🔥 ưu tiên loại tín hiệu
-                if f["type"] == "PRE":
+                if f["type"] == "EARLY_BREAKOUT":
+                    score *= 1.8
+                elif f["type"] == "PRE":
                     score *= 1.6
                 elif f["type"] == "EARLY":
                     score *= 1.3
                 elif f["type"] == "STRONG":
                     score *= 1.0
-
-                # 🔥 session boost
-                if session == "CLOSE":
+                elif f["type"] == "PULLBACK":
                     score *= 1.2
 
                 if mode == "AGGRESSIVE":
@@ -259,10 +231,12 @@ def main():
 
     print("\nTOTAL SIGNAL:", len(signals))
 
-    # ===== TELEGRAM =====
+    # =========================
+    # TELEGRAM
+    # =========================
     if signals:
 
-        msg = f"🔥 SMART MONEY SIGNALS ({session})\n\n"
+        msg = "🔥 SMART MONEY SIGNALS\n\n"
 
         for s in signals:
             msg += (
