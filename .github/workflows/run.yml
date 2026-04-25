@@ -2,17 +2,31 @@ name: Find Bot
 
 on:
   schedule:
-    - cron: "0 2 * * 1-5"   # preload sáng
-    - cron: "0 3 * * 1-5"   # run bot
-    - cron: "0 4 * * 1-5"   # 🔥 backtest
+    # 🇻🇳 08:30 (UTC+7) → preload
+    - cron: "30 1 * * 1-5"
+
+    # 🇻🇳 09:30 → run bot (đầu phiên)
+    - cron: "30 2 * * 1-5"
+
+    # 🇻🇳 11:00 → run bot (giữa phiên)
+    - cron: "0 4 * * 1-5"
+
+    # 🇻🇳 14:30 → run bot (cuối phiên)
+    - cron: "30 7 * * 1-5"
+
+    # 🇻🇳 16:00 → backtest
+    - cron: "0 9 * * 1-5"
+
   workflow_dispatch:
+
 
 jobs:
 
   # =========================
-  # PRELOAD DATA
+  # PRELOAD DATA (08:30 VN)
   # =========================
   preload:
+    if: github.event.schedule == '30 1 * * 1-5'
     runs-on: ubuntu-latest
 
     permissions:
@@ -35,13 +49,17 @@ jobs:
           git commit -m "update data" || echo "no change"
           git push
 
+
   # =========================
-  # RUN BOT (GIỮ NGUYÊN)
+  # RUN BOT (09:30 / 11:00 / 14:30)
   # =========================
   run:
+    if: |
+      github.event.schedule == '30 2 * * 1-5' ||
+      github.event.schedule == '0 4 * * 1-5' ||
+      github.event.schedule == '30 7 * * 1-5'
     runs-on: ubuntu-latest
-    needs: preload
-    
+
     permissions:
       contents: write
       
@@ -67,12 +85,13 @@ jobs:
           name: bot-log
           path: logs/run.log
 
+
   # =========================
-  # BACKTEST (MỚI)
+  # BACKTEST (16:00 VN)
   # =========================
   backtest:
+    if: github.event.schedule == '0 9 * * 1-5'
     runs-on: ubuntu-latest
-    needs: preload
 
     permissions:
       contents: write
@@ -86,19 +105,16 @@ jobs:
       - name: Create log folder
         run: mkdir -p logs
 
-      # 🔥 chạy backtest
       - name: Run backtest
         run: |
           python src/run_backtest.py 2>&1 | tee logs/backtest.log
 
-      # 💾 upload log backtest
       - name: Upload backtest log
         uses: actions/upload-artifact@v4
         with:
           name: backtest-log
           path: logs/backtest.log
 
-      # 💾 commit kết quả backtest
       - name: Commit backtest result
         run: |
           git config --global user.name "bot"
