@@ -22,8 +22,12 @@ from tracker import log_trade
 
 import os
 import requests
+import datetime
 
 
+# =========================
+# TELEGRAM
+# =========================
 def send_telegram(msg):
 
     token = os.getenv("TELEGRAM_TOKEN")
@@ -44,9 +48,30 @@ def send_telegram(msg):
         print("❌ TELEGRAM ERROR:", str(e))
 
 
+# =========================
+# SESSION DETECT
+# =========================
+def get_session():
+
+    hour = datetime.datetime.utcnow().hour + 7
+
+    if hour < 11:
+        return "MORNING"
+    elif hour < 14:
+        return "MID"
+    else:
+        return "CLOSE"
+
+
+# =========================
+# MAIN
+# =========================
 def main():
 
     print("🚀 START BOT")
+
+    session = get_session()
+    print("🕒 SESSION:", session)
 
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
@@ -98,9 +123,11 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # AUTO MODE FILTER
+            # 🔥 dynamic RS theo MODE + SESSION
             if mode == "SAFE":
                 rs_cond = rs > -0.02
+            elif session == "MORNING":
+                rs_cond = rs > -0.05
             else:
                 rs_cond = rs > -0.08
 
@@ -114,7 +141,14 @@ def main():
                     (1 if acc else 0)
                 )
 
-                score += flow_acc * 1.0
+                # 🔥 boost dòng tiền tích lũy nhiều ngày
+                score += flow_acc * 1.2
+
+                # 🔥 session boost
+                if session == "MORNING":
+                    score *= 1.1
+                elif session == "CLOSE":
+                    score *= 1.2
 
                 scored.append((symbol, score))
 
@@ -123,8 +157,9 @@ def main():
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
+    # fallback
     if not scored:
-        leaders = leaders[:8]
+        leaders = leaders[:10]
     else:
         if mode == "SAFE":
             leaders = [s[0] for s in scored[:8]]
@@ -150,21 +185,32 @@ def main():
 
             if ok:
 
+                # 🔥 tránh mua đuổi (AGGRESSIVE)
                 if mode == "AGGRESSIVE":
-                    if abs(price - f["entry"]) / f["entry"] > 0.07:
+                    if abs(price - f["entry"]) / f["entry"] > 0.08:
                         print("   ❌ too far")
                         continue
 
                 rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
+                # 🔥 loại RR quá thấp
+                if rr < 1.2:
+                    print("   ❌ low RR")
+                    continue
+
                 score = rr
 
+                # 🔥 ưu tiên loại tín hiệu
                 if f["type"] == "PRE":
                     score *= 1.6
                 elif f["type"] == "EARLY":
                     score *= 1.3
                 elif f["type"] == "STRONG":
                     score *= 1.0
+
+                # 🔥 session boost
+                if session == "CLOSE":
+                    score *= 1.2
 
                 if mode == "AGGRESSIVE":
                     score *= 1.2
@@ -194,9 +240,10 @@ def main():
 
     print("\nTOTAL SIGNAL:", len(signals))
 
+    # ===== TELEGRAM =====
     if signals:
 
-        msg = "🔥 SMART MONEY SIGNALS\n\n"
+        msg = f"🔥 SMART MONEY SIGNALS ({session})\n\n"
 
         for s in signals:
             msg += (
