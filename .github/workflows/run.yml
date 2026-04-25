@@ -5,13 +5,13 @@ on:
     # 🇻🇳 08:30 → preload
     - cron: "30 1 * * 1-5"
 
-    # 🇻🇳 09:30 → run bot (đầu phiên)
+    # 🇻🇳 09:30 → run bot
     - cron: "30 2 * * 1-5"
 
-    # 🇻🇳 11:00 → run bot (giữa phiên)
+    # 🇻🇳 11:00
     - cron: "0 4 * * 1-5"
 
-    # 🇻🇳 14:30 → run bot (cuối phiên)
+    # 🇻🇳 14:30
     - cron: "30 7 * * 1-5"
 
     # 🇻🇳 16:00 → backtest
@@ -19,11 +19,10 @@ on:
 
   workflow_dispatch:
 
-
 jobs:
 
   # =========================
-  # PRELOAD DATA
+  # PRELOAD DATA → PUSH DATA BRANCH
   # =========================
   preload:
     if: |
@@ -43,17 +42,25 @@ jobs:
       - name: Preload data
         run: python src/preload_data.py
 
-      - name: Commit data
+      # 🔥 PUSH SANG BRANCH DATA
+      - name: Commit to data branch
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
-          git add data/market/ || echo "no data"
-          git commit -m "update data" || echo "no change"
-          git push
+
+          git fetch origin
+          git checkout data || git checkout -b data
+
+          git add data/market/ data/liquidity.csv || true
+
+          git commit -m "update market data" || echo "no change"
+
+          git pull --rebase origin data || true
+          git push origin data
 
 
   # =========================
-  # RUN BOT
+  # RUN BOT → READ DATA BRANCH
   # =========================
   run:
     if: |
@@ -64,10 +71,18 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: write
+      contents: read
 
     steps:
+      # code
       - uses: actions/checkout@v3
+
+      # 🔥 checkout data branch vào folder riêng
+      - name: Checkout data branch
+        uses: actions/checkout@v3
+        with:
+          ref: data
+          path: data-branch
 
       - name: Install
         run: pip install vnstock pandas requests
@@ -90,7 +105,7 @@ jobs:
 
 
   # =========================
-  # BACKTEST
+  # BACKTEST → PUSH DATA BRANCH
   # =========================
   backtest:
     if: |
@@ -120,10 +135,18 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      - name: Commit backtest result
+      # 🔥 PUSH RESULT SANG DATA BRANCH
+      - name: Commit backtest to data branch
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
-          git add backtest_result.csv || echo "no file"
-          git commit -m "update backtest" || echo "no change"
-          git push
+
+          git fetch origin
+          git checkout data || git checkout -b data
+
+          git add backtest_result.csv || true
+
+          git commit -m "update backtest result" || echo "no change"
+
+          git pull --rebase origin data || true
+          git push origin data
