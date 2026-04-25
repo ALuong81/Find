@@ -35,6 +35,33 @@ def simulate_trade(df, entry, sl, tp):
 
 
 # =========================
+# PRELOAD ALL DATA (🔥 tối ưu)
+# =========================
+def preload_all(symbols):
+
+    data_map = {}
+
+    for symbol in symbols:
+        try:
+            df = load_stock_data(symbol)
+
+            if df is None or df.empty:
+                continue
+
+            # 🔥 FIX DATETIME TRIỆT ĐỂ
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
+            df = df.sort_values("date")
+
+            data_map[symbol] = df
+
+        except:
+            continue
+
+    return data_map
+
+
+# =========================
 # BACKTEST
 # =========================
 def run_backtest(start_date="2023-01-01"):
@@ -44,22 +71,27 @@ def run_backtest(start_date="2023-01-01"):
     df_symbols = load_symbols()
     df_index_full = load_index()
 
-    # 🔥 đảm bảo datetime
-    df_index_full["date"] = pd.to_datetime(df_index_full["date"])
+    # 🔥 FIX datetime index
+    df_index_full["date"] = pd.to_datetime(df_index_full["date"], errors="coerce")
+    df_index_full = df_index_full.dropna(subset=["date"])
+    df_index_full = df_index_full.sort_values("date")
 
     equity = INITIAL_CAPITAL
     history = []
 
-    unique_dates = sorted(df_index_full["date"].unique())
+    unique_dates = df_index_full["date"].unique()
+
+    # 🔥 PRELOAD DATA 1 LẦN (cực quan trọng)
+    symbols_all = df_symbols["symbol"].tolist()
+    data_map = preload_all(symbols_all)
 
     for date in unique_dates:
 
-        # 🔥 FIX DATE
         if date < start_date:
             continue
 
         # =========================
-        # MARKET (không leak)
+        # MARKET
         # =========================
         df_index = df_index_full[df_index_full["date"] <= date]
 
@@ -91,7 +123,10 @@ def run_backtest(start_date="2023-01-01"):
 
         for symbol in leaders:
 
-            df_full = load_stock_data(symbol)
+            if symbol not in data_map:
+                continue
+
+            df_full = data_map[symbol]
 
             # 🔥 NO LOOKAHEAD
             df = df_full[df_full["date"] <= date]
@@ -133,9 +168,11 @@ def run_backtest(start_date="2023-01-01"):
         # =========================
         for symbol in leaders:
 
-            df_full = load_stock_data(symbol)
+            if symbol not in data_map:
+                continue
 
-            # 🔥 DATA TỚI HIỆN TẠI
+            df_full = data_map[symbol]
+
             df = df_full[df_full["date"] <= date]
 
             if len(df) < 50:
@@ -168,8 +205,7 @@ def run_backtest(start_date="2023-01-01"):
 
             if result == 1:
                 rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
-                profit = risk * rr
-                equity += profit
+                equity += risk * rr
 
             elif result == -1:
                 equity -= risk
