@@ -2,7 +2,6 @@ from breakout import breakout_type
 from accumulation import detect_accumulation
 from money_flow import money_flow_score
 from institutional import institutional_score
-from flow_timeline import flow_timeline
 
 
 def validate_entry(df):
@@ -33,34 +32,31 @@ def validate_entry(df):
 
         price = close.iloc[-1]
 
-        # ===== GIỮ NGUYÊN =====
+        # ===== SMART FILTER =====
         flow = money_flow_score(df)
         inst = institutional_score(df)
 
         if flow == 0:
-            print("DEBUG: no money flow")
             return False, None
 
         if inst == 0:
-            print("DEBUG: no institution")
             return False, None
 
-        # ===== ADD =====
-        flow_acc = flow_timeline(df)
+        rr = (tp1 - entry) / (entry - sl)
 
-        # ===== LOGIC CŨ =====
+        if rr < 1.3:  # 🔥 thêm nhẹ để tăng quality
+            return False, None
 
+        # ===== ENTRY =====
         if b_type == "PRE":
 
             if not detect_accumulation(df):
-                print("DEBUG: no accumulation")
                 return False, None
 
             if price > swing_high * 1.02:
-                print("DEBUG: chasing price")
                 return False, None
 
-            result = {
+            return True, {
                 "entry": price,
                 "sl": sl,
                 "tp1": tp1,
@@ -70,14 +66,8 @@ def validate_entry(df):
                 "inst": inst
             }
 
-            if flow_acc > 0.5:
-                result["tp2"] = swing_high * 1.15
-
-            return True, result
-
         if b_type == "EARLY":
-
-            if entry * 0.97 <= price <= entry * 1.03:
+            if entry * 0.95 <= price <= entry * 1.05:
                 return True, {
                     "entry": entry,
                     "sl": sl,
@@ -89,7 +79,6 @@ def validate_entry(df):
                 }
 
         if b_type == "STRONG":
-
             if entry * 0.98 <= price <= entry * 1.02:
                 return True, {
                     "entry": entry,
