@@ -53,8 +53,13 @@ def validate_entry(df, symbol=None):
         # =========================
         b_type = breakout_type(df)
 
+
         if b_type is None:
-            return False, None
+            # 🔥 fallback: nếu có accumulation + dòng tiền mạnh
+            if detect_accumulation(df):
+                if institutional_flow_score(df) > 1:
+                    return "PRE"
+            
 
         # PRE
         if b_type == "PRE":
