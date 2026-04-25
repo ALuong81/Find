@@ -6,31 +6,22 @@ CACHE_FILE = "data/liquidity.csv"
 
 
 # =========================
-# 🔥 CORE METRICS
+# 🔥 CORE METRICS (GIỮ NGUYÊN)
 # =========================
 
 def calculate_liquidity(df):
-    """
-    Thanh khoản = giá trị giao dịch trung bình 20 ngày
-    """
     vol = df["volume"].tail(20).mean()
     price = df["close"].iloc[-1]
     return vol * price
 
 
 def calculate_momentum(df):
-    """
-    Momentum = % tăng giá 20 ngày
-    """
     if len(df) < 20:
         return 0
     return (df["close"].iloc[-1] / df["close"].iloc[-20]) - 1
 
 
 def calculate_volume_score(df):
-    """
-    Volume spike = volume hiện tại so với trung bình
-    """
     vol_now = df["volume"].iloc[-1]
     vol_avg = df["volume"].tail(20).mean()
 
@@ -41,9 +32,6 @@ def calculate_volume_score(df):
 
 
 def calculate_trend_score(df):
-    """
-    Trend = MA20 vs MA50
-    """
     if len(df) < 50:
         return 0
 
@@ -54,18 +42,16 @@ def calculate_trend_score(df):
 
 
 # =========================
-# 🔥 SMART MONEY FLOW SCORE
+# 🔥 SMART SCORE (GIỮ NGUYÊN)
 # =========================
 
 def calculate_smart_score(df):
-
     try:
         liquidity = calculate_liquidity(df)
         momentum = calculate_momentum(df)
         volume_score = calculate_volume_score(df)
         trend = calculate_trend_score(df)
 
-        # 🔥 normalize nhẹ
         score = (
             (momentum * 2) +
             (volume_score * 0.5) +
@@ -79,23 +65,35 @@ def calculate_smart_score(df):
 
 
 # =========================
-# 🔥 MAIN RANKING
+# 🔥 MAIN (FIX KIẾN TRÚC)
 # =========================
 
-def rank_liquidity(df_symbols, top_n=50, use_cache=True):
+def rank_liquidity(df_symbols, top_n=50, use_cache=True, min_liquidity=5e8):
+    """
+    min_liquidity mặc định 0.5 tỷ (giảm từ 1 tỷ để tránh empty)
+    """
 
-    # 🔥 load cache nếu có
+    # =========================
+    # 🔥 LOAD CACHE (SAFE)
+    # =========================
     if use_cache and os.path.exists(CACHE_FILE):
+        try:
+            print("⚡ LOAD LIQUIDITY CACHE")
 
-        print("⚡ LOAD LIQUIDITY CACHE")
+            df = pd.read_csv(CACHE_FILE)
 
-        df = pd.read_csv(CACHE_FILE)
+            # 🔥 đảm bảo cột tồn tại
+            if "symbol" in df.columns and "liquidity" in df.columns:
+                df = df.sort_values(["liquidity", "score"], ascending=False)
+                return df.head(top_n)
 
-        df = df.sort_values("score", ascending=False)
+        except:
+            print("⚠️ CACHE ERROR → RECALCULATE")
 
-        return df.head(top_n)
-
-    print("🚀 CALCULATE LIQUIDITY + MONEY FLOW...")
+    # =========================
+    # 🔥 CALCULATE
+    # =========================
+    print("🚀 CALCULATE LIQUIDITY + SMART FLOW...")
 
     results = []
 
@@ -106,7 +104,17 @@ def rank_liquidity(df_symbols, top_n=50, use_cache=True):
         try:
             df = load_stock_data(symbol)
 
+            if df is None or df.empty or len(df) < 20:
+                continue
+
+            # 🔥 FIX DATETIME (QUAN TRỌNG)
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"])
+
             liquidity, score = calculate_smart_score(df)
+
+            if liquidity <= 0:
+                continue
 
             results.append({
                 "symbol": symbol,
@@ -121,14 +129,34 @@ def rank_liquidity(df_symbols, top_n=50, use_cache=True):
 
     df = pd.DataFrame(results)
 
-    # 🔥 lọc cổ có thanh khoản tối thiểu
-    df = df[df["liquidity"] > 1e9]   # > 1 tỷ / ngày
+    # =========================
+    # 🔥 FALLBACK (QUAN TRỌNG)
+    # =========================
+    if df.empty:
+        print("⚠️ NO DATA → fallback ALL SYMBOLS")
+        return df_symbols.copy()
 
-    # 🔥 sort theo smart money flow
-    df = df.sort_values(["score", "liquidity"], ascending=False)
+    # =========================
+    # 🔥 LIQUIDITY FILTER (MỀM HƠN)
+    # =========================
+    df = df[df["liquidity"] > min_liquidity]
 
-    # 🔥 save cache
-    os.makedirs("data", exist_ok=True)
-    df.to_csv(CACHE_FILE, index=False)
+    if df.empty:
+        print("⚠️ LIQUIDITY FILTER EMPTY → fallback NO FILTER")
+        df = pd.DataFrame(results)
+
+    # =========================
+    # 🔥 SORT (LIQUIDITY FIRST)
+    # =========================
+    df = df.sort_values(["liquidity", "score"], ascending=False)
+
+    # =========================
+    # 🔥 SAVE CACHE
+    # =========================
+    try:
+        os.makedirs("data", exist_ok=True)
+        df.to_csv(CACHE_FILE, index=False)
+    except:
+        pass
 
     return df.head(top_n)
