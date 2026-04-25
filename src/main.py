@@ -1,5 +1,6 @@
 from symbol_loader import load_symbols
-from data_loader import load_stock_data, load_index
+from data_loader import load_stock_data_h1, load_stock_data, load_index
+from mtf_confirm import mtf_confirm
 
 from smart_money import (
     market_score,
@@ -181,9 +182,27 @@ def main():
 
             ok, f = validate_entry(df)
 
+            # =========================
+            # 🔥 MTF CONFIRM (lọc fake breakout)
+            # =========================
+             if ok:
+                 df_h1 = load_stock_data_h1(symbol)
+                 if not mtf_confirm(df, df_h1):
+                     print("   ❌ MTF FAIL")
+                     continue
+        
             print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
 
             if ok:
+                # SAFE mode → bắt buộc MTF
+                if mode == "SAFE":
+                    if not mtf_confirm(df, df_h1):
+                        continue
+                # AGGRESSIVE → cho pass nếu PRE
+                elif mode == "AGGRESSIVE":
+                     if f["type"] != "PRE":
+                         if not mtf_confirm(df, df_h1):
+                             continue
 
                 # 🔥 tránh mua đuổi (AGGRESSIVE)
                 if mode == "AGGRESSIVE":
