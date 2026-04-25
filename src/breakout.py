@@ -45,10 +45,10 @@ def breakout_type(df):
     if price >= resistance * 0.80 and price < resistance * 0.95:
         return "PRE"
 
-    if price >= resistance * 0.95 and vol.iloc[-1] > vol_ma.iloc[-1] * 1.2:
-        return "STRONG"
+    if price >= resistance * 0.92 and vol.iloc[-1] > vol_ma.iloc[-1] * 1.1:
+        return "STRONG"o
 
-    if price >= resistance * 0.88:
+    if price >= resistance * 0.85:
         return "EARLY"
 
     return None
