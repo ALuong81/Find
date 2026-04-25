@@ -16,36 +16,60 @@ RISK_PER_TRADE = 0.02
 MAX_HOLD_DAYS = 10
 
 
+# =========================
+# SIMULATE TRADE
+# =========================
 def simulate_trade(df, entry, sl, tp):
 
     for i in range(len(df)):
-        if df["low"].iloc[i] <= sl:
+        low = df["low"].iloc[i]
+        high = df["high"].iloc[i]
+
+        if low <= sl:
             return -1
-        if df["high"].iloc[i] >= tp:
+
+        if high >= tp:
             return 1
 
     return 0
 
 
+# =========================
+# BACKTEST
+# =========================
 def run_backtest(start_date="2023-01-01"):
+
+    start_date = pd.to_datetime(start_date)
 
     df_symbols = load_symbols()
     df_index_full = load_index()
 
+    # 🔥 đảm bảo datetime
+    df_index_full["date"] = pd.to_datetime(df_index_full["date"])
+
     equity = INITIAL_CAPITAL
     history = []
 
-    for date in df_index_full["date"].unique():
+    unique_dates = sorted(df_index_full["date"].unique())
 
+    for date in unique_dates:
+
+        # 🔥 FIX DATE
         if date < start_date:
             continue
 
+        # =========================
+        # MARKET (không leak)
+        # =========================
         df_index = df_index_full[df_index_full["date"] <= date]
 
         m = market_score()
         if m < 0:
             continue
 
+        # =========================
+        # SECTOR
+        # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
 
@@ -60,33 +84,42 @@ def run_backtest(start_date="2023-01-01"):
 
         leaders = list(set(leaders))
 
+        # =========================
+        # FILTER
+        # =========================
         scored = []
 
         for symbol in leaders:
 
-            df = load_stock_data(symbol)
-            df = df[df["date"] <= date]
+            df_full = load_stock_data(symbol)
+
+            # 🔥 NO LOOKAHEAD
+            df = df_full[df_full["date"] <= date]
 
             if len(df) < 50:
                 continue
 
-            rs = relative_strength(df, df_index)
-            voe = voe_score(df, df_index)
-            inst = institutional_score(df)
-            mf = money_flow_score(df)
-            acc = detect_accumulation(df)
+            try:
+                rs = relative_strength(df, df_index)
+                voe = voe_score(df, df_index)
+                inst = institutional_score(df)
+                mf = money_flow_score(df)
+                acc = detect_accumulation(df)
 
-            if rs > -0.05:
+                if rs > -0.05:
 
-                score = (
-                    rs * 2 +
-                    voe * 1.5 +
-                    inst * 1.5 +
-                    mf * 1.2 +
-                    (1 if acc else 0)
-                )
+                    score = (
+                        rs * 2 +
+                        voe * 1.5 +
+                        inst * 1.5 +
+                        mf * 1.2 +
+                        (1 if acc else 0)
+                    )
 
-                scored.append((symbol, score))
+                    scored.append((symbol, score))
+
+            except:
+                continue
 
         scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -95,18 +128,28 @@ def run_backtest(start_date="2023-01-01"):
 
         leaders = [s[0] for s in scored[:5]]
 
+        # =========================
+        # ENTRY
+        # =========================
         for symbol in leaders:
 
-            df = load_stock_data(symbol)
-            df = df[df["date"] <= date]
+            df_full = load_stock_data(symbol)
 
-            ok, f = validate_entry(df)
+            # 🔥 DATA TỚI HIỆN TẠI
+            df = df_full[df_full["date"] <= date]
+
+            if len(df) < 50:
+                continue
+
+            ok, f = validate_entry(df, symbol)
 
             if not ok:
                 continue
 
-            future_df = load_stock_data(symbol)
-            future_df = future_df[future_df["date"] > date].head(MAX_HOLD_DAYS)
+            # =========================
+            # FUTURE DATA
+            # =========================
+            future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
 
             if future_df.empty:
                 continue
@@ -118,11 +161,16 @@ def run_backtest(start_date="2023-01-01"):
                 f["tp1"]
             )
 
+            # =========================
+            # POSITION SIZING
+            # =========================
             risk = equity * RISK_PER_TRADE
 
             if result == 1:
-                profit = risk * ((f["tp1"] - f["entry"]) / (f["entry"] - f["sl"]))
+                rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
+                profit = risk * rr
                 equity += profit
+
             elif result == -1:
                 equity -= risk
 
