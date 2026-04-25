@@ -19,6 +19,7 @@ on:
 
   workflow_dispatch:
 
+
 jobs:
 
   # =========================
@@ -42,21 +43,26 @@ jobs:
       - name: Preload data
         run: python src/preload_data.py
 
-      # 🔥 PUSH SANG BRANCH DATA
+      # 🔥 PUSH DATA
       - name: Commit to data branch
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
 
           git fetch origin
-          git checkout data || git checkout -b data
+
+          # 🔥 check branch tồn tại chưa
+          if git ls-remote --exit-code --heads origin data; then
+            git checkout data
+            git pull origin data
+          else
+            git checkout -b data
+          fi
 
           git add data/market/ data/liquidity.csv || true
-
           git commit -m "update market data" || echo "no change"
 
-          git pull --rebase origin data || true
-          git push origin data
+          git push -u origin data || git push origin data
 
 
   # =========================
@@ -77,8 +83,9 @@ jobs:
       # code
       - uses: actions/checkout@v3
 
-      # 🔥 checkout data branch vào folder riêng
+      # 🔥 checkout data branch (không crash nếu chưa có)
       - name: Checkout data branch
+        continue-on-error: true
         uses: actions/checkout@v3
         with:
           ref: data
@@ -135,18 +142,22 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      # 🔥 PUSH RESULT SANG DATA BRANCH
+      # 🔥 PUSH BACKTEST RESULT
       - name: Commit backtest to data branch
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
 
           git fetch origin
-          git checkout data || git checkout -b data
+
+          if git ls-remote --exit-code --heads origin data; then
+            git checkout data
+            git pull origin data
+          else
+            git checkout -b data
+          fi
 
           git add backtest_result.csv || true
-
           git commit -m "update backtest result" || echo "no change"
 
-          git pull --rebase origin data || true
-          git push origin data
+          git push -u origin data || git push origin data
