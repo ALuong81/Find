@@ -33,9 +33,7 @@ def validate_entry(df):
 
         price = close.iloc[-1]
 
-        # =========================
-        # 🔥 GIỮ NGUYÊN FILTER CŨ
-        # =========================
+        # ===== GIỮ NGUYÊN =====
         flow = money_flow_score(df)
         inst = institutional_score(df)
 
@@ -47,14 +45,10 @@ def validate_entry(df):
             print("DEBUG: no institution")
             return False, None
 
-        # =========================
-        # 🔥 BỔ SUNG (KHÔNG CHẶN)
-        # =========================
-        flow_acc = flow_timeline(df)  # NEW (không block)
+        # ===== ADD =====
+        flow_acc = flow_timeline(df)
 
-        # =========================
-        # 🔥 ENTRY LOGIC (GIỮ NGUYÊN)
-        # =========================
+        # ===== LOGIC CŨ =====
 
         if b_type == "PRE":
 
@@ -76,7 +70,6 @@ def validate_entry(df):
                 "inst": inst
             }
 
-            # 🔥 ADD-ON (boost TP, không ảnh hưởng logic cũ)
             if flow_acc > 0.5:
                 result["tp2"] = swing_high * 1.15
 
@@ -85,8 +78,7 @@ def validate_entry(df):
         if b_type == "EARLY":
 
             if entry * 0.97 <= price <= entry * 1.03:
-
-                result = {
+                return True, {
                     "entry": entry,
                     "sl": sl,
                     "tp1": tp1,
@@ -96,13 +88,10 @@ def validate_entry(df):
                     "inst": inst
                 }
 
-                return True, result
-
         if b_type == "STRONG":
 
             if entry * 0.98 <= price <= entry * 1.02:
-
-                result = {
+                return True, {
                     "entry": entry,
                     "sl": sl,
                     "tp1": tp1,
@@ -111,8 +100,6 @@ def validate_entry(df):
                     "flow": flow,
                     "inst": inst
                 }
-
-                return True, result
 
         return False, None
 
