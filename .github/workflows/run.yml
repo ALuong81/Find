@@ -4,10 +4,14 @@ on:
   schedule:
     - cron: "0 2 * * 1-5"   # preload sáng
     - cron: "0 3 * * 1-5"   # run bot
+    - cron: "0 4 * * 1-5"   # 🔥 backtest
   workflow_dispatch:
 
 jobs:
 
+  # =========================
+  # PRELOAD DATA
+  # =========================
   preload:
     runs-on: ubuntu-latest
 
@@ -31,21 +35,25 @@ jobs:
           git commit -m "update data" || echo "no change"
           git push
 
+  # =========================
+  # RUN BOT (GIỮ NGUYÊN)
+  # =========================
   run:
     runs-on: ubuntu-latest
     needs: preload
-
+    
+    permissions:
+      contents: write
+      
     steps:
       - uses: actions/checkout@v3
 
       - name: Install
         run: pip install vnstock pandas requests
 
-      # 🔥 tạo folder log
       - name: Create log folder
         run: mkdir -p logs
 
-      # 🚀 RUN BOT + TELEGRAM + LOG
       - name: Run bot
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
@@ -53,9 +61,48 @@ jobs:
         run: |
           python src/main.py 2>&1 | tee logs/run.log
 
-      # 💾 lưu log để debug
       - name: Upload log
         uses: actions/upload-artifact@v4
         with:
           name: bot-log
           path: logs/run.log
+
+  # =========================
+  # BACKTEST (MỚI)
+  # =========================
+  backtest:
+    runs-on: ubuntu-latest
+    needs: preload
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install
+        run: pip install vnstock pandas numpy
+
+      - name: Create log folder
+        run: mkdir -p logs
+
+      # 🔥 chạy backtest
+      - name: Run backtest
+        run: |
+          python src/run_backtest.py 2>&1 | tee logs/backtest.log
+
+      # 💾 upload log backtest
+      - name: Upload backtest log
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-log
+          path: logs/backtest.log
+
+      # 💾 commit kết quả backtest
+      - name: Commit backtest result
+        run: |
+          git config --global user.name "bot"
+          git config --global user.email "bot@bot.com"
+          git add backtest_result.csv || echo "no file"
+          git commit -m "update backtest" || echo "no change"
+          git push
