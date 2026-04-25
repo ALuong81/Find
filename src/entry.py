@@ -3,8 +3,11 @@ from accumulation import detect_accumulation
 from money_flow import money_flow_score
 from institutional import institutional_score
 
+from early_breakout import detect_early_breakout
+from data_loader import load_stock_data_h1
 
-def validate_entry(df):
+
+def validate_entry(df, symbol=None):
 
     try:
         if df is None or len(df) < 50:
@@ -14,10 +17,7 @@ def validate_entry(df):
         high = df["high"]
         low = df["low"]
 
-        b_type = breakout_type(df)
-
-        if b_type is None:
-            return False, None
+        price = close.iloc[-1]
 
         swing_high = high.tail(20).max()
         swing_low = low.tail(20).min()
@@ -26,72 +26,82 @@ def validate_entry(df):
             return False, None
 
         entry = swing_high - (swing_high - swing_low) * 0.382
-        sl = swing_low
-        tp1 = swing_high
-        tp2 = swing_high * 1.1
 
-        price = close.iloc[-1]
-
-        # ===== SMART FILTER =====
         flow = money_flow_score(df)
         inst = institutional_score(df)
 
-        if flow == 0:
+        if flow == 0 or inst == 0:
             return False, None
 
-        if inst == 0:
+        # =========================
+        # 🔥 EARLY BREAKOUT (H1 trước D1)
+        # =========================
+        if symbol:
+            df_h1 = load_stock_data_h1(symbol)
+
+            if detect_early_breakout(df, df_h1):
+                return True, {
+                    "entry": price,
+                    "sl": swing_low,
+                    "tp1": swing_high,
+                    "tp2": swing_high * 1.1,
+                    "type": "EARLY_BREAKOUT"
+                }
+
+        # =========================
+        # 🔥 BREAKOUT TYPE
+        # =========================
+        b_type = breakout_type(df)
+
+        if b_type is None:
             return False, None
 
-        rr = (tp1 - entry) / (entry - sl)
-
-        if rr < 1.3:  # 🔥 thêm nhẹ để tăng quality
-            return False, None
-
-        # ===== ENTRY =====
+        # PRE
         if b_type == "PRE":
+            if detect_accumulation(df) and price <= swing_high * 1.02:
+                return True, {
+                    "entry": price,
+                    "sl": swing_low,
+                    "tp1": swing_high,
+                    "tp2": swing_high * 1.1,
+                    "type": "PRE"
+                }
 
-            if not detect_accumulation(df):
-                return False, None
-
-            if price > swing_high * 1.02:
-                return False, None
-
-            return True, {
-                "entry": price,
-                "sl": sl,
-                "tp1": tp1,
-                "tp2": tp2,
-                "type": "PRE",
-                "flow": flow,
-                "inst": inst
-            }
-
+        # EARLY
         if b_type == "EARLY":
             if entry * 0.95 <= price <= entry * 1.05:
                 return True, {
                     "entry": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "EARLY",
-                    "flow": flow,
-                    "inst": inst
+                    "sl": swing_low,
+                    "tp1": swing_high,
+                    "tp2": swing_high * 1.1,
+                    "type": "EARLY"
                 }
 
+        # STRONG
         if b_type == "STRONG":
             if entry * 0.98 <= price <= entry * 1.02:
                 return True, {
                     "entry": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "STRONG",
-                    "flow": flow,
-                    "inst": inst
+                    "sl": swing_low,
+                    "tp1": swing_high,
+                    "tp2": swing_high * 1.1,
+                    "type": "STRONG"
                 }
+
+        # =========================
+        # 🔥 FALLBACK (tăng tín hiệu)
+        # =========================
+        if price >= swing_low * 1.05:
+            return True, {
+                "entry": price,
+                "sl": swing_low,
+                "tp1": swing_high,
+                "tp2": swing_high * 1.1,
+                "type": "PULLBACK"
+            }
 
         return False, None
 
-    except Exception as e:
-        print("ENTRY ERROR:", str(e))
+    except:
         return False, None
