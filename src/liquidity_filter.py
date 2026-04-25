@@ -1,4 +1,4 @@
-re import pandas as pd
+import pandas as pd
 import os
 from data_loader import load_stock_data
 
