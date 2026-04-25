@@ -114,7 +114,7 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # 🔥 AUTO MODE FILTER
+            # 🔥 AUTO MODE FILTER (nới nhẹ)
             if mode == "SAFE":
                 rs_cond = rs > -0.03
             else:
@@ -139,10 +139,12 @@ def main():
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # fallback
+    # =========================
+    # LEADER SELECT (FIX NGHẼN)
+    # =========================
     if not scored:
         print("⚠️ NO STRONG LEADER → fallback")
-        leaders = leaders[:10]
+        leaders = leaders[:12]
     else:
         if mode == "SAFE":
             leaders = [s[0] for s in scored[:10]]
@@ -164,24 +166,33 @@ def main():
             df = load_stock_data(symbol)
             price = df["close"].iloc[-1]
 
-            ok, f = validate_entry(df, symbol)
+            ok, f = validate_entry(df)
 
             print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
 
             if ok:
 
-                df_h1 = load_stock_data_h1(symbol)
+                # =========================
+                # 🔥 LOAD H1 (SAFE LOAD)
+                # =========================
+                try:
+                    df_h1 = load_stock_data_h1(symbol)
+                except:
+                    df_h1 = None
 
                 # =========================
-                # 🔥 MTF CONFIRM (lọc fake)
+                # 🔥 MTF CONFIRM (KHÔNG GIẾT TÍN HIỆU)
                 # =========================
-                if f["type"] in ["EARLY_BREAKOUT", "PRE", "EARLY"]:
-                    if not mtf_confirm(df, df_h1):
-                        print("   ❌ MTF FAIL")
-                        continue
+                if f["type"] in ["EARLY", "PRE"]:
+                    if df_h1 is not None:
+                        if not mtf_confirm(df, df_h1):
+                            print("   ❌ MTF FAIL")
+                            continue
+                    else:
+                        print("   ⚠️ NO H1 DATA → SKIP MTF")
 
                 # =========================
-                # 🔥 AGGRESSIVE MODE FILTER
+                # 🔥 AGGRESSIVE FILTER
                 # =========================
                 if mode == "AGGRESSIVE":
                     if abs(price - f["entry"]) / f["entry"] > 0.07:
@@ -192,16 +203,12 @@ def main():
 
                 score = rr
 
-                if f["type"] == "EARLY_BREAKOUT":
-                    score *= 1.8
-                elif f["type"] == "PRE":
+                if f["type"] == "PRE":
                     score *= 1.6
                 elif f["type"] == "EARLY":
                     score *= 1.3
                 elif f["type"] == "STRONG":
                     score *= 1.0
-                elif f["type"] == "PULLBACK":
-                    score *= 1.2
 
                 if mode == "AGGRESSIVE":
                     score *= 1.2
