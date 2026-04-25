@@ -2,7 +2,7 @@ name: Find Bot
 
 on:
   schedule:
-    # 🇻🇳 08:30 (UTC+7) → preload
+    # 🇻🇳 08:30 → preload
     - cron: "30 1 * * 1-5"
 
     # 🇻🇳 09:30 → run bot (đầu phiên)
@@ -23,15 +23,17 @@ on:
 jobs:
 
   # =========================
-  # PRELOAD DATA (08:30 VN)
+  # PRELOAD DATA
   # =========================
   preload:
-    if: github.event.schedule == '30 1 * * 1-5'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '30 1 * * 1-5'
     runs-on: ubuntu-latest
 
     permissions:
       contents: write
-      
+
     steps:
       - uses: actions/checkout@v3
 
@@ -45,16 +47,17 @@ jobs:
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
-          git add data/market/
+          git add data/market/ || echo "no data"
           git commit -m "update data" || echo "no change"
           git push
 
 
   # =========================
-  # RUN BOT (09:30 / 11:00 / 14:30)
+  # RUN BOT
   # =========================
   run:
     if: |
+      github.event_name == 'workflow_dispatch' ||
       github.event.schedule == '30 2 * * 1-5' ||
       github.event.schedule == '0 4 * * 1-5' ||
       github.event.schedule == '30 7 * * 1-5'
@@ -62,7 +65,7 @@ jobs:
 
     permissions:
       contents: write
-      
+
     steps:
       - uses: actions/checkout@v3
 
@@ -87,10 +90,12 @@ jobs:
 
 
   # =========================
-  # BACKTEST (16:00 VN)
+  # BACKTEST
   # =========================
   backtest:
-    if: github.event.schedule == '0 9 * * 1-5'
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event.schedule == '0 9 * * 1-5'
     runs-on: ubuntu-latest
 
     permissions:
