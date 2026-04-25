@@ -43,7 +43,7 @@ jobs:
       - name: Preload data
         run: python src/preload_data.py
 
-      # 🔥 PUSH DATA
+      # 🔥 COMMIT DATA (FIX FULL)
       - name: Commit to data branch
         run: |
           git config --global user.name "bot"
@@ -51,10 +51,9 @@ jobs:
 
           git fetch origin
 
-          # 🔥 check branch tồn tại chưa
+          # 🔥 FIX CONFLICT branch vs folder
           if git ls-remote --exit-code --heads origin data; then
-            git checkout data
-            git pull origin data
+            git checkout -B data origin/data
           else
             git checkout -b data
           fi
@@ -80,10 +79,9 @@ jobs:
       contents: read
 
     steps:
-      # code
       - uses: actions/checkout@v3
 
-      # 🔥 checkout data branch (không crash nếu chưa có)
+      # 🔥 KHÔNG CRASH nếu chưa có branch
       - name: Checkout data branch
         continue-on-error: true
         uses: actions/checkout@v3
@@ -142,7 +140,7 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      # 🔥 PUSH BACKTEST RESULT
+      # 🔥 COMMIT BACKTEST (FIX FULL)
       - name: Commit backtest to data branch
         run: |
           git config --global user.name "bot"
@@ -151,8 +149,7 @@ jobs:
           git fetch origin
 
           if git ls-remote --exit-code --heads origin data; then
-            git checkout data
-            git pull origin data
+            git checkout -B data origin/data
           else
             git checkout -b data
           fi
