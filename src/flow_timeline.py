@@ -1,28 +1,23 @@
 def flow_timeline(df):
 
     try:
-        if df is None or len(df) < 30:
-            return 0
-
+        vol = df["volume"]
         close = df["close"]
-        volume = df["volume"]
 
-        # money flow = price change * volume
-        flow = (close.pct_change() * volume).fillna(0)
+        vol_ma5 = vol.rolling(5).mean()
+        vol_ma20 = vol.rolling(20).mean()
 
-        # xu hướng 5 ngày
-        recent = flow.tail(5).sum()
+        price_change = close.pct_change()
 
-        # xu hướng 10 ngày
-        base = flow.tail(10).sum()
+        recent_flow = (price_change * vol).tail(5).mean()
+        base_flow = (price_change * vol).tail(20).mean()
 
-        if base == 0:
+        if base_flow == 0:
             return 0
 
-        # 🔥 acceleration
-        score = recent / abs(base)
+        acceleration = recent_flow / abs(base_flow)
 
-        return score
+        return max(0, min(acceleration, 2))
 
     except:
         return 0
