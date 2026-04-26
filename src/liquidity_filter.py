@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 import os
 from data_loader import load_stock_data
 
@@ -16,13 +17,20 @@ def calculate_liquidity(df):
     if pd.isna(vol) or pd.isna(price):
         return 0
 
-    return vol * price
+    raw = vol * price
+
+    # 🔥 LOG SCALE (GIẢM BIAS BIG CAP)
+    return np.log1p(raw)
 
 
 def calculate_momentum(df):
     if len(df) < 20:
         return 0
-    return (df["close"].iloc[-1] / df["close"].iloc[-20]) - 1
+
+    ret = (df["close"].iloc[-1] / df["close"].iloc[-20]) - 1
+
+    # 🔥 SCALE
+    return np.tanh(ret * 5)
 
 
 def calculate_volume_score(df):
@@ -32,7 +40,10 @@ def calculate_volume_score(df):
     if vol_avg == 0 or pd.isna(vol_avg):
         return 0
 
-    return vol_now / vol_avg
+    ratio = vol_now / vol_avg
+
+    # 🔥 SCALE
+    return np.tanh((ratio - 1) * 2)
 
 
 def calculate_trend_score(df):
@@ -45,11 +56,13 @@ def calculate_trend_score(df):
     if pd.isna(ma20) or pd.isna(ma50):
         return 0
 
-    return 1 if ma20 > ma50 else -1
+    raw = 1 if ma20 > ma50 else -1
+
+    return raw  # đã nằm trong [-1,1]
 
 
 # =========================
-# 🔥 SMART SCORE
+# 🔥 SMART SCORE (NORMALIZED)
 # =========================
 
 def calculate_smart_score(df):
@@ -59,11 +72,15 @@ def calculate_smart_score(df):
         volume_score = calculate_volume_score(df)
         trend = calculate_trend_score(df)
 
+        # 🔥 COMBINE
         score = (
-            (momentum * 2) +
-            (volume_score * 0.5) +
-            (trend * 1)
+            momentum * 1.5 +
+            volume_score * 1.0 +
+            trend * 1.0
         )
+
+        # 🔥 FINAL SCALE [-1 → +1]
+        score = np.tanh(score)
 
         return liquidity, score
 
@@ -73,20 +90,13 @@ def calculate_smart_score(df):
 
 
 # =========================
-# 🔥 MAIN RANKING (FINAL FIX)
+# 🔥 MAIN RANKING (V4)
 # =========================
 
 def rank_liquidity(df_symbols, top_n=50, use_cache=True, min_liquidity=3e8):
-    """
-    ✅ FIX FULL:
-    - Không phụ thuộc cache 100%
-    - Cache chỉ dùng nếu hợp lệ
-    - Fallback khi empty
-    - Hạ liquidity threshold
-    """
 
     # =========================
-    # 🔥 TRY CACHE (SOFT USE)
+    # 🔥 LOAD CACHE (SOFT)
     # =========================
     cache_df = None
 
@@ -148,7 +158,7 @@ def rank_liquidity(df_symbols, top_n=50, use_cache=True, min_liquidity=3e8):
     df = pd.DataFrame(results)
 
     # =========================
-    # 🔥 HARD FAIL → FALLBACK
+    # 🔥 HARD FAIL
     # =========================
     if df.empty:
 
@@ -164,24 +174,38 @@ def rank_liquidity(df_symbols, top_n=50, use_cache=True, min_liquidity=3e8):
         return fallback.head(top_n)
 
     # =========================
+    # 🔥 NORMALIZE CROSS-STOCK
+    # =========================
+    try:
+        df["liquidity"] = (df["liquidity"] - df["liquidity"].mean()) / (df["liquidity"].std() + 1e-9)
+        df["score"] = (df["score"] - df["score"].mean()) / (df["score"].std() + 1e-9)
+    except:
+        pass
+
+    # =========================
     # 🔥 FILTER (SOFT)
     # =========================
-    df_filtered = df[df["liquidity"] > min_liquidity]
+    df_filtered = df[df["liquidity"] > -1.5]  # 🔥 thay vì min_liquidity cứng
 
     if df_filtered.empty:
-        print("⚠️ FILTER TOO STRICT → USE RAW DATA")
+        print("⚠️ FILTER TOO STRICT → USE RAW")
         df_filtered = df
 
     # =========================
-    # 🔥 SORT
+    # 🔥 FINAL RANK SCORE
     # =========================
+    df_filtered["final_score"] = (
+        df_filtered["liquidity"] * 1.2 +
+        df_filtered["score"] * 1.5
+    )
+
     df_filtered = df_filtered.sort_values(
-        ["liquidity", "score"],
+        "final_score",
         ascending=False
     )
 
     # =========================
-    # 🔥 SAVE CACHE (NON-BLOCKING)
+    # 🔥 SAVE CACHE
     # =========================
     try:
         os.makedirs("data", exist_ok=True)
