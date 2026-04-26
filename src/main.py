@@ -2,7 +2,6 @@ from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index, load_stock_data_h1
 
 from smart_money import (
-    market_score,
     sector_money_flow,
     pick_leaders
 )
@@ -50,7 +49,7 @@ def send_telegram(msg):
 
 
 # =========================
-# 🔥 V4 MARKET REGIME (ML STYLE)
+# 🔥 MARKET REGIME (SOFT)
 # =========================
 def market_regime(df_index):
 
@@ -59,30 +58,58 @@ def market_regime(df_index):
 
         ret_5 = close.pct_change(5).iloc[-1]
         ret_20 = close.pct_change(20).iloc[-1]
-
         vol = close.pct_change().rolling(20).std().iloc[-1]
 
-        trend = close.rolling(20).mean().iloc[-1] - close.rolling(50).mean().iloc[-1]
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ma50 = close.rolling(50).mean().iloc[-1]
+
+        trend = 1 if ma20 > ma50 else -1
 
         score = (
             ret_5 * 2 +
             ret_20 * 1.5 -
             vol * 2 +
-            (1 if trend > 0 else -1)
+            trend
         )
 
-        # 🔥 normalize
         score = np.tanh(score * 3)
 
         if score > 0.3:
             return "AGGRESSIVE", score
-        elif score > -0.2:
+        elif score > -0.3:
             return "NEUTRAL", score
         else:
             return "DEFENSIVE", score
 
     except:
         return "DEFENSIVE", -1
+
+
+# =========================
+# 🔥 REGIME CONFIG (KEY V4)
+# =========================
+def regime_config(mode):
+
+    if mode == "AGGRESSIVE":
+        return {
+            "rs_threshold": -0.12,
+            "position_scale": 1.0,
+            "score_boost": 1.2
+        }
+
+    if mode == "NEUTRAL":
+        return {
+            "rs_threshold": -0.07,
+            "position_scale": 0.7,
+            "score_boost": 1.0
+        }
+
+    # DEFENSIVE
+    return {
+        "rs_threshold": -0.03,
+        "position_scale": 0.4,
+        "score_boost": 0.8
+    }
 
 
 # =========================
@@ -96,17 +123,18 @@ def main():
     print("TOTAL SYMBOLS:", len(df_symbols))
 
     # =========================
-    # 🔥 MARKET V4
+    # 🔥 MARKET (NO MORE STOP)
     # =========================
     df_index = load_index()
 
     mode, m_score = market_regime(df_index)
+    cfg = regime_config(mode)
 
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
+    # ❌ KHÔNG STOP nữa
     if mode == "DEFENSIVE":
-        print("❌ MARKET DEFENSIVE → STOP")
-        return
+        print("⚠️ DEFENSIVE MODE → giảm risk, không tắt bot")
 
     # =========================
     # SECTOR
@@ -134,7 +162,7 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 🔥 FILTER + SCORING V4
+    # 🔥 FILTER + SCORING
     # =========================
     scored = []
 
@@ -150,13 +178,9 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # 🔥 adaptive RS filter
-            if mode == "AGGRESSIVE":
-                if rs < -0.12:
-                    continue
-            else:
-                if rs < -0.05:
-                    continue
+            # 🔥 adaptive RS theo regime
+            if rs < cfg["rs_threshold"]:
+                continue
 
             score = (
                 rs * 2 +
@@ -168,7 +192,6 @@ def main():
                 (1 if acc else 0)
             )
 
-            # 🔥 nonlinear boost
             score *= (1 + np.tanh(score))
 
             scored.append((symbol, score))
@@ -187,7 +210,7 @@ def main():
     print("\n🔥 STRONG LEADERS:", leaders)
 
     # =========================
-    # 🔥 ENTRY V4
+    # ENTRY
     # =========================
     print("\nSCAN ENTRY...\n")
 
@@ -208,7 +231,7 @@ def main():
                 continue
 
             # =========================
-            # 🔥 SOFT MTF CONFIRM
+            # MTF SOFT
             # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
@@ -216,15 +239,11 @@ def main():
             except:
                 mtf_ok = True
 
-            # 🔥 KHÔNG kill signal
             if not mtf_ok:
-                print("   ⚠️ MTF WEAK (not rejected)")
+                print("   ⚠️ MTF WEAK")
 
             rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
-            # =========================
-            # 🔥 SIGNAL SCORE V4
-            # =========================
             score = rr
 
             type_weight = {
@@ -237,14 +256,12 @@ def main():
 
             score *= type_weight.get(f["type"], 1.0)
 
-            # 🔥 combine with system strength
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
             final_score = score * (1 + system_score * 0.1)
 
-            # 🔥 regime boost
-            if mode == "AGGRESSIVE":
-                final_score *= 1.2
+            # 🔥 regime scaling
+            final_score *= cfg["score_boost"]
 
             signals.append({
                 "symbol": symbol,
@@ -254,7 +271,8 @@ def main():
                 "tp2": f["tp2"],
                 "rr": rr,
                 "type": f["type"],
-                "score": final_score
+                "score": final_score,
+                "risk_scale": cfg["position_scale"]
             })
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
@@ -273,7 +291,7 @@ def main():
     # =========================
     if signals:
 
-        msg = "🔥 V4 SMART MONEY SIGNALS\n\n"
+        msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
 
         for s in signals:
             msg += (
@@ -281,7 +299,8 @@ def main():
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
-                f"RR: {round(s['rr'],2)}\n\n"
+                f"RR: {round(s['rr'],2)}\n"
+                f"Risk: x{s['risk_scale']}\n\n"
             )
 
         send_telegram(msg)
