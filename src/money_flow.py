@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+
 
 # =========================
 # 1. VOLUME BY PRICE (VBP)
@@ -12,7 +14,6 @@ def volume_profile(df, bins=20):
     price_max = close.max()
 
     levels = np.linspace(price_min, price_max, bins)
-
     profile = np.zeros(len(levels))
 
     for i in range(len(close)):
@@ -30,15 +31,15 @@ def detect_hvn(df):
 
     levels, profile = volume_profile(df)
 
+    if len(profile) == 0:
+        return None
+
     max_idx = np.argmax(profile)
-
-    hvn_price = levels[max_idx]
-
-    return hvn_price
+    return levels[max_idx]
 
 
 # =========================
-# 3. IMBALANCE (CẦU > CUNG)
+# 3. IMBALANCE (CONTINUOUS)
 # =========================
 def detect_imbalance(df):
 
@@ -50,39 +51,90 @@ def detect_imbalance(df):
     down_vol = vol[close < open_].sum()
 
     if down_vol == 0:
-        return 0
+        return 2.0  # cực mạnh
 
-    return up_vol / down_vol
+    ratio = up_vol / down_vol
+
+    # 🔥 scale về ~[-1 → +2]
+    score = np.tanh((ratio - 1) * 1.5) * 2
+
+    return score
 
 
 # =========================
-# 4. ACCUMULATION ZONE
+# 4. ACCUMULATION ZONE (SOFT)
 # =========================
-def detect_accumulation_zone(df):
+def accumulation_score(df):
 
     hvn = detect_hvn(df)
+
+    if hvn is None or hvn == 0:
+        return 0
+
     price = df["close"].iloc[-1]
 
-    # giá gần HVN → tổ chức giữ vùng này
-    if abs(price - hvn) / hvn < 0.03:
-        return True
+    dist = abs(price - hvn) / hvn
 
-    return False
+    # 🔥 càng gần HVN → score cao
+    score = 1 - (dist / 0.05)
+
+    return np.clip(score, -1, 1)
 
 
 # =========================
-# 5. MONEY FLOW SCORE
+# 5. EMA SMOOTH
+# =========================
+def ema_smooth(series, span=5):
+
+    return series.ewm(span=span, adjust=False).mean().iloc[-1]
+
+
+# =========================
+# 6. MONEY FLOW SCORE (V4)
 # =========================
 def money_flow_score(df):
 
-    score = 0
+    try:
+        if df is None or len(df) < 30:
+            return 0
 
-    imbalance = detect_imbalance(df)
+        # =========================
+        # RAW COMPONENTS
+        # =========================
+        imbalance_raw = detect_imbalance(df)
+        acc_raw = accumulation_score(df)
 
-    if imbalance > 1.2:
-        score += 1
+        # =========================
+        # BUILD SERIES FOR SMOOTH
+        # =========================
+        imbalance_series = pd.Series(
+            [detect_imbalance(df.iloc[:i]) for i in range(20, len(df))]
+        )
 
-    if detect_accumulation_zone(df):
-        score += 1
+        acc_series = pd.Series(
+            [accumulation_score(df.iloc[:i]) for i in range(20, len(df))]
+        )
 
-    return score
+        # =========================
+        # EMA SMOOTH
+        # =========================
+        imbalance = ema_smooth(imbalance_series)
+        acc = ema_smooth(acc_series)
+
+        # =========================
+        # FINAL SCORE
+        # =========================
+        score = (
+            imbalance * 1.5 +
+            acc * 1.2
+        )
+
+        # 🔥 normalize về [-1 → +2]
+        score = np.tanh(score) * 2
+
+        return score
+
+    except Exception as e:
+        print("FLOW ERROR:", str(e))
+        return 0
+    
