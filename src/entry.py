@@ -40,7 +40,7 @@ def validate_entry(df, symbol=None, regime="NEUTRAL"):
         b_type = breakout_type(df)
 
         # =========================
-        # 🔥 SMART MONEY SCORE (PURE SOFT)
+        # 🔥 SMART MONEY SCORE (SOFT)
         # =========================
         flow = money_flow_score(df)
         inst = institutional_score(df)
@@ -53,7 +53,7 @@ def validate_entry(df, symbol=None, regime="NEUTRAL"):
         )
 
         # =========================
-        # 🔥 REGIME ADJUST (KHÔNG REJECT)
+        # 🔥 REGIME ADJUST
         # =========================
         if regime == "AGGRESSIVE":
             sm_score *= 1.1
@@ -61,7 +61,7 @@ def validate_entry(df, symbol=None, regime="NEUTRAL"):
             sm_score *= 0.8
 
         # =========================
-        # 🔥 CONFIDENCE (NEW)
+        # 🔥 CONFIDENCE (SOFT)
         # =========================
         confidence = 0.5
 
@@ -70,7 +70,12 @@ def validate_entry(df, symbol=None, regime="NEUTRAL"):
         elif sm_score > 0:
             confidence += 0.1
         elif sm_score < -1:
-            confidence -= 0.2
+            confidence -= 0.25  # 🔥 tăng penalty
+
+        # =========================
+        # 🔥 TYPE DEFAULT
+        # =========================
+        final_type = "PULLBACK"
 
         # =========================
         # 🔥 EARLY BREAKOUT H1 (TOP PRIORITY)
@@ -81,94 +86,56 @@ def validate_entry(df, symbol=None, regime="NEUTRAL"):
 
                 if df_h1 is not None and len(df_h1) > 20:
                     if detect_early_breakout(df, df_h1):
-                        return True, {
-                            "entry": price,
-                            "sl": sl,
-                            "tp1": tp1,
-                            "tp2": tp2,
-                            "type": "EARLY_BREAKOUT",
-                            "sm_score": sm_score,
-                            "confidence": min(confidence + 0.2, 1)
-                        }
+                        final_type = "EARLY_BREAKOUT"
+                        confidence += 0.25
             except Exception as e:
                 print("H1 ERROR:", str(e))
 
         # =========================
-        # PRE (ưu tiên cao)
+        # TYPE LOGIC (KHÔNG REJECT)
         # =========================
         if b_type == "PRE":
             if detect_accumulation(df):
                 if price <= swing_high * 1.05:
-                    return True, {
-                        "entry": price,
-                        "sl": sl,
-                        "tp1": tp1,
-                        "tp2": tp2,
-                        "type": "PRE",
-                        "sm_score": sm_score,
-                        "confidence": confidence
-                    }
+                    final_type = "PRE"
+                    confidence += 0.15
 
-        # =========================
-        # EARLY
-        # =========================
-        if b_type == "EARLY":
+        elif b_type == "EARLY":
             if entry * 0.9 <= price <= entry * 1.1:
-                return True, {
-                    "entry": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "EARLY",
-                    "sm_score": sm_score,
-                    "confidence": confidence
-                }
+                final_type = "EARLY"
+                confidence += 0.1
 
-        # =========================
-        # STRONG
-        # =========================
-        if b_type == "STRONG":
+        elif b_type == "STRONG":
             if entry * 0.93 <= price <= entry * 1.07:
-                return True, {
-                    "entry": entry,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "STRONG",
-                    "sm_score": sm_score,
-                    "confidence": confidence
-                }
+                final_type = "STRONG"
+                confidence += 0.05
 
-        # =========================
-        # FALLBACK PRE
-        # =========================
-        if b_type is None:
+        elif b_type is None:
             if detect_accumulation(df):
-                return True, {
-                    "entry": price,
-                    "sl": sl,
-                    "tp1": tp1,
-                    "tp2": tp2,
-                    "type": "PRE",
-                    "sm_score": sm_score,
-                    "confidence": confidence * 0.9
-                }
+                final_type = "PRE"
+                confidence += 0.05
 
         # =========================
-        # SMART PULLBACK (LUÔN MỞ)
+        # 🔥 PENALTY ZONE (THAY VÌ REJECT)
         # =========================
-        if entry * 0.85 <= price <= entry * 1.15:
-            return True, {
-                "entry": price,
-                "sl": sl,
-                "tp1": tp1,
-                "tp2": tp2,
-                "type": "PULLBACK",
-                "sm_score": sm_score,
-                "confidence": confidence * 0.8
-            }
+        if not (entry * 0.85 <= price <= entry * 1.15):
+            confidence -= 0.2
 
-        return False, None
+        # clamp confidence
+        confidence = max(0, min(confidence, 1))
+
+        # =========================
+        # 🔥 FINAL OUTPUT (LUÔN RETURN)
+        # =========================
+        return True, {
+            "entry": price if final_type in ["PRE", "PULLBACK", "EARLY_BREAKOUT"] else entry,
+            "sl": sl,
+            "tp1": tp1,
+            "tp2": tp2,
+            "type": final_type,
+            "sm_score": sm_score,
+            "confidence": confidence
+        }
 
     except Exception as e:
         print("ENTRY ERROR:", str(e))
