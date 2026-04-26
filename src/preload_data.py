@@ -21,8 +21,10 @@ def fetch_incremental(symbol, start, end):
     for src in ["VCI", "MSN", "KBS"]:
         try:
             df = fetch_with_source(symbol, src, start, end)
+
             if df is not None and not df.empty:
                 return df
+
         except Exception as e:
             continue
 
@@ -36,6 +38,9 @@ def normalize(df):
 
     required_cols = ["time", "open", "high", "low", "close", "volume"]
 
+    if df is None or df.empty:
+        return None
+
     if not all(col in df.columns for col in required_cols):
         return None
 
@@ -48,7 +53,8 @@ def normalize(df):
         "volume": "volume"
     })
 
-    df["date"] = pd.to_datetime(df["date"])
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    df = df.dropna(subset=["date"])
 
     return df
 
@@ -70,7 +76,9 @@ def update_symbol(symbol):
             df = load_stock_data(symbol)
 
             if df is not None and not df.empty:
-                df["date"] = pd.to_datetime(df["date"])
+                df["date"] = pd.to_datetime(df["date"], errors="coerce")
+                df = df.dropna(subset=["date"])
+                df = df.sort_values("date")
 
             return symbol, df
 
@@ -79,12 +87,18 @@ def update_symbol(symbol):
         # =========================
         df_old = pd.read_csv(path)
 
-        if df_old.empty or "date" not in df_old.columns:
+        if df_old is None or df_old.empty or "date" not in df_old.columns:
             print("⚠️ CORRUPT:", symbol)
             df = load_stock_data(symbol)
             return symbol, df
 
-        df_old["date"] = pd.to_datetime(df_old["date"])
+        df_old["date"] = pd.to_datetime(df_old["date"], errors="coerce")
+        df_old = df_old.dropna(subset=["date"])
+
+        if df_old.empty:
+            print("⚠️ EMPTY AFTER CLEAN:", symbol)
+            df = load_stock_data(symbol)
+            return symbol, df
 
         last_date = df_old["date"].max()
 
@@ -92,14 +106,14 @@ def update_symbol(symbol):
         end = pd.Timestamp.today().normalize()
 
         # =========================
-        # NO NEED UPDATE
+        # NO UPDATE NEEDED
         # =========================
         if start > end:
             print("⏭️ SKIP:", symbol)
             return symbol, df_old
 
         # =========================
-        # FETCH NEW
+        # FETCH NEW DATA
         # =========================
         new_df = fetch_incremental(symbol, start, end)
 
@@ -109,18 +123,18 @@ def update_symbol(symbol):
 
         new_df = normalize(new_df)
 
-        if new_df is None:
+        if new_df is None or new_df.empty:
             print("❌ BAD FORMAT:", symbol)
             return symbol, df_old
 
         # =========================
-        # MERGE
+        # MERGE DATA
         # =========================
-        df = pd.concat([df_old, new_df])
+        df = pd.concat([df_old, new_df], ignore_index=True)
         df = df.drop_duplicates(subset=["date"])
         df = df.sort_values("date")
 
-        print("🔄 UPDATE:", symbol, f"(+{len(new_df)})")
+        print(f"🔄 UPDATE: {symbol} (+{len(new_df)})")
 
         return symbol, df
 
@@ -138,10 +152,22 @@ def main():
 
     print("CALCULATE LIQUIDITY...")
 
-    # 🔥 FIX: chỉ là universe filter, KHÔNG phải signal
+    # =========================
+    # 🔥 SMART UNIVERSE FILTER
+    # =========================
     df_top = rank_liquidity(df_symbols, top_n=50)
 
-    symbols = df_top["symbol"].tolist()
+    # 🔥 FIX: tránh empty → fallback
+    if df_top is None or df_top.empty or "symbol" not in df_top.columns:
+        print("⚠️ LIQUIDITY EMPTY → fallback ALL SYMBOLS")
+        symbols = df_symbols["symbol"].tolist()
+    else:
+        symbols = df_top["symbol"].dropna().tolist()
+
+    # 🔥 HARD FALLBACK
+    if not symbols:
+        print("⚠️ SYMBOL EMPTY → FORCE LOAD ALL")
+        symbols = df_symbols["symbol"].tolist()
 
     print("🔥 TOP LIQUIDITY:", symbols[:10])
     print("🚀 PRELOAD PARALLEL:", len(symbols))
@@ -149,6 +175,9 @@ def main():
     success = 0
     fail = 0
 
+    # =========================
+    # MULTI THREAD
+    # =========================
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
         futures = [executor.submit(update_symbol, s) for s in symbols]
@@ -157,9 +186,12 @@ def main():
 
             symbol, df = future.result()
 
-            if df is not None:
-                df.to_csv(f"{SAVE_DIR}/{symbol}.csv", index=False)
-                success += 1
+            if df is not None and not df.empty:
+                try:
+                    df.to_csv(f"{SAVE_DIR}/{symbol}.csv", index=False)
+                    success += 1
+                except:
+                    fail += 1
             else:
                 fail += 1
 
