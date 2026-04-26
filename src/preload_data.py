@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from data_loader import load_stock_data, fetch_with_source
@@ -25,14 +24,14 @@ def fetch_incremental(symbol, start, end):
             if df is not None and not df.empty:
                 return df
 
-        except Exception as e:
+        except Exception:
             continue
 
     return None
 
 
 # =========================
-# NORMALIZE DATA
+# 🔥 NORMALIZE (FIX FULL)
 # =========================
 def normalize(df):
 
@@ -44,19 +43,49 @@ def normalize(df):
     if not all(col in df.columns for col in required_cols):
         return None
 
-    df = df.rename(columns={
-        "time": "date",
-        "open": "open",
-        "high": "high",
-        "low": "low",
-        "close": "close",
-        "volume": "volume"
-    })
+    try:
+        df = df.rename(columns={"time": "date"})
 
-    df["date"] = pd.to_datetime(df["date"], errors="coerce")
-    df = df.dropna(subset=["date"])
+        # 🔥 chuẩn hóa datetime TRIỆT ĐỂ
+        df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
+        df["date"] = df["date"].dt.tz_convert(None)
 
-    return df
+        df = df.dropna(subset=["date"])
+
+        # 🔥 ép numeric tránh lỗi string
+        for col in ["open", "high", "low", "close", "volume"]:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+        df = df.dropna(subset=["close", "volume"])
+
+        # 🔥 sort + dedup tại normalize luôn
+        df = df.sort_values("date")
+        df = df.drop_duplicates(subset=["date"], keep="last")
+
+        return df
+
+    except Exception:
+        return None
+
+
+# =========================
+# 🔥 CLEAN OLD DATA
+# =========================
+def clean_old(df):
+
+    try:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
+        df["date"] = df["date"].dt.tz_convert(None)
+
+        df = df.dropna(subset=["date"])
+
+        df = df.sort_values("date")
+        df = df.drop_duplicates(subset=["date"], keep="last")
+
+        return df
+
+    except Exception:
+        return None
 
 
 # =========================
@@ -74,65 +103,58 @@ def update_symbol(symbol):
             print("🆕 FULL LOAD:", symbol)
 
             df = load_stock_data(symbol)
-
-            if df is not None and not df.empty:
-                df["date"] = pd.to_datetime(df["date"], errors="coerce")
-                df = df.dropna(subset=["date"])
-                df = df.sort_values("date")
+            df = normalize(df)
 
             return symbol, df
 
         # =========================
         # LOAD OLD
         # =========================
-        df_old = pd.read_csv(path)
+        try:
+            df_old = pd.read_csv(path)
+        except Exception:
+            print("⚠️ READ FAIL:", symbol)
+            return symbol, None
 
-        if df_old is None or df_old.empty or "date" not in df_old.columns:
+        df_old = clean_old(df_old)
+
+        if df_old is None or df_old.empty:
             print("⚠️ CORRUPT:", symbol)
-            df = load_stock_data(symbol)
-            return symbol, df
-
-        df_old["date"] = pd.to_datetime(df_old["date"], errors="coerce")
-        df_old = df_old.dropna(subset=["date"])
-
-        if df_old.empty:
-            print("⚠️ EMPTY AFTER CLEAN:", symbol)
-            df = load_stock_data(symbol)
+            df = normalize(load_stock_data(symbol))
             return symbol, df
 
         last_date = df_old["date"].max()
 
         start = last_date + pd.Timedelta(days=1)
-        end = pd.Timestamp.today().normalize()
+        end = pd.Timestamp.utcnow().normalize()
 
         # =========================
-        # NO UPDATE NEEDED
+        # NO UPDATE
         # =========================
         if start > end:
             print("⏭️ SKIP:", symbol)
             return symbol, df_old
 
         # =========================
-        # FETCH NEW DATA
+        # FETCH NEW
         # =========================
         new_df = fetch_incremental(symbol, start, end)
+        new_df = normalize(new_df)
 
         if new_df is None or new_df.empty:
             print("⚠️ NO NEW:", symbol)
             return symbol, df_old
 
-        new_df = normalize(new_df)
-
-        if new_df is None or new_df.empty:
-            print("❌ BAD FORMAT:", symbol)
-            return symbol, df_old
-
         # =========================
-        # MERGE DATA
+        # MERGE + FIX DUPLICATE TRIỆT ĐỂ
         # =========================
         df = pd.concat([df_old, new_df], ignore_index=True)
-        df = df.drop_duplicates(subset=["date"])
+
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"])
+
         df = df.sort_values("date")
+        df = df.drop_duplicates(subset=["date"], keep="last")
 
         print(f"🔄 UPDATE: {symbol} (+{len(new_df)})")
 
@@ -152,21 +174,19 @@ def main():
 
     print("CALCULATE LIQUIDITY...")
 
-    # =========================
-    # 🔥 SMART UNIVERSE FILTER
-    # =========================
     df_top = rank_liquidity(df_symbols, top_n=50)
 
-    # 🔥 FIX: tránh empty → fallback
+    # =========================
+    # 🔥 SAFE SYMBOL LIST
+    # =========================
     if df_top is None or df_top.empty or "symbol" not in df_top.columns:
-        print("⚠️ LIQUIDITY EMPTY → fallback ALL SYMBOLS")
+        print("⚠️ LIQUIDITY EMPTY → fallback ALL")
         symbols = df_symbols["symbol"].tolist()
     else:
         symbols = df_top["symbol"].dropna().tolist()
 
-    # 🔥 HARD FALLBACK
     if not symbols:
-        print("⚠️ SYMBOL EMPTY → FORCE LOAD ALL")
+        print("⚠️ SYMBOL EMPTY → FORCE ALL")
         symbols = df_symbols["symbol"].tolist()
 
     print("🔥 TOP LIQUIDITY:", symbols[:10])
@@ -176,23 +196,28 @@ def main():
     fail = 0
 
     # =========================
-    # MULTI THREAD
+    # MULTI THREAD (SAFE)
     # =========================
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
-        futures = [executor.submit(update_symbol, s) for s in symbols]
+        futures = {executor.submit(update_symbol, s): s for s in symbols}
 
         for future in as_completed(futures):
 
-            symbol, df = future.result()
+            symbol = futures[future]
 
-            if df is not None and not df.empty:
-                try:
+            try:
+                symbol, df = future.result()
+
+                if df is not None and not df.empty:
                     df.to_csv(f"{SAVE_DIR}/{symbol}.csv", index=False)
                     success += 1
-                except:
+                else:
+                    print("⚠️ SKIP EMPTY:", symbol)
                     fail += 1
-            else:
+
+            except Exception as e:
+                print("❌ FUTURE ERROR:", symbol, str(e))
                 fail += 1
 
     print("\n===== RESULT =====")
