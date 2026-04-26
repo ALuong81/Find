@@ -51,18 +51,30 @@ def market_regime(df_index):
 
 
 # =========================
-# SIMULATE TRADE
+# ✅ FIX: SIMULATE REALISTIC
 # =========================
 def simulate_trade(df, entry, sl, tp):
 
     for i in range(len(df)):
-        low = df["low"].iloc[i]
-        high = df["high"].iloc[i]
 
-        if low <= sl:
+        o = df["open"].iloc[i]
+        h = df["high"].iloc[i]
+        l = df["low"].iloc[i]
+
+        # 🔥 ưu tiên gap open
+        if o <= sl:
+            return -1
+        if o >= tp:
+            return 1
+
+        # 🔥 nếu cả TP và SL cùng bị hit → assume SL hit trước (conservative)
+        if l <= sl and h >= tp:
             return -1
 
-        if high >= tp:
+        if l <= sl:
+            return -1
+
+        if h >= tp:
             return 1
 
     return 0
@@ -109,7 +121,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST V4
+# BACKTEST V4 FINAL
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -135,9 +147,6 @@ def run_backtest(start_date="2023-01-01"):
         if date < start_date:
             continue
 
-        # =========================
-        # 🔥 MARKET REGIME
-        # =========================
         df_index = df_index_full[df_index_full["date"] <= date]
 
         if len(df_index) < 50:
@@ -146,17 +155,20 @@ def run_backtest(start_date="2023-01-01"):
         mode, m_score = market_regime(df_index)
 
         # =========================
-        # 🔥 POSITION SIZE BY REGIME
+        # ❌ NO TRADE IN DEFENSIVE
+        # =========================
+        if mode == "DEFENSIVE":
+            continue
+
+        # =========================
+        # 🔥 POSITION SIZING
         # =========================
         if mode == "AGGRESSIVE":
             risk_pct = 0.025
             score_threshold = -0.5
-        elif mode == "NEUTRAL":
+        else:  # NEUTRAL
             risk_pct = 0.015
             score_threshold = -0.2
-        else:
-            risk_pct = 0.007
-            score_threshold = 0.0
 
         # =========================
         # SECTOR
@@ -179,7 +191,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # 🔥 SCORING V4
+        # 🔥 SCORING (SYNC LIVE)
         # =========================
         scored = []
 
@@ -213,7 +225,7 @@ def run_backtest(start_date="2023-01-01"):
                     (1 if acc else 0)
                 )
 
-                # 🔥 nonlinear boost
+                # 🔥 nonlinear boost (giống live)
                 score *= (1 + np.tanh(score))
 
                 if score > score_threshold:
