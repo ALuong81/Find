@@ -10,10 +10,10 @@ on:
 
   workflow_dispatch:
 
-# 🔥 tránh chạy trùng job
 concurrency:
   group: find-bot-${{ github.ref }}
   cancel-in-progress: false
+
 
 jobs:
 
@@ -35,12 +35,12 @@ jobs:
       - name: Install
         run: pip install vnstock pandas
 
-      # 🔥 cache theo ngày → tránh stale
+      # 🔥 CACHE THEO NGÀY
       - name: Restore market cache
         uses: actions/cache@v3
         with:
           path: data/market
-          key: market-${{ runner.os }}-${{ github.run_date }}
+          key: market-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             market-${{ runner.os }}-
 
@@ -51,9 +51,11 @@ jobs:
         uses: actions/cache@v3
         with:
           path: data/market
-          key: market-${{ runner.os }}-${{ github.run_date }}
+          key: market-${{ runner.os }}-${{ github.run_id }}
 
-      # 🔥 WORKTREE PUSH (SAFE)
+      # =========================
+      # 🔥 WORKTREE PUSH FIXED
+      # =========================
       - name: Push data via worktree
         run: |
           git config --global user.name "bot"
@@ -61,22 +63,26 @@ jobs:
 
           git fetch origin
 
-          # 🔥 clean worktree cũ nếu có
           rm -rf data-wt || true
 
+          # tạo worktree
           if git ls-remote --exit-code --heads origin data; then
             git worktree add data-wt origin/data
           else
             git worktree add -b data data-wt
           fi
 
-          mkdir -p data-wt/data/market
-          rsync -av --delete data/market/ data-wt/data/market/ || true
-          cp data/liquidity.csv data-wt/data/ || true
-
           cd data-wt
 
+          # 🔥 FIX DETACHED HEAD
+          git checkout -B data || git checkout data
+
+          mkdir -p data/market
+          rsync -av --delete ../data/market/ data/market/ || true
+          cp ../data/liquidity.csv data/ || true
+
           git add .
+
           git commit -m "update market data $(date)" || echo "no change"
 
           git pull --rebase origin data || true
@@ -104,7 +110,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: data/market
-          key: market-${{ runner.os }}-${{ github.run_date }}
+          key: market-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             market-${{ runner.os }}-
 
@@ -155,7 +161,7 @@ jobs:
         uses: actions/cache@v3
         with:
           path: data/market
-          key: market-${{ runner.os }}-${{ github.run_date }}
+          key: market-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             market-${{ runner.os }}-
 
@@ -174,13 +180,16 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      # 🔥 PUSH RESULT
-      - name: Push backtest result via worktree
+      # =========================
+      # 🔥 WORKTREE PUSH FIXED
+      # =========================
+      - name: Push backtest result
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
 
           git fetch origin
+
           rm -rf data-wt || true
 
           if git ls-remote --exit-code --heads origin data; then
@@ -189,9 +198,12 @@ jobs:
             git worktree add -b data data-wt
           fi
 
-          cp backtest_result.csv data-wt/ || true
-
           cd data-wt
+
+          # 🔥 FIX DETACHED HEAD
+          git checkout -B data || git checkout data
+
+          cp ../backtest_result.csv . || true
 
           git add .
           git commit -m "update backtest $(date)" || echo "no change"
