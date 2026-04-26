@@ -49,7 +49,7 @@ def send_telegram(msg):
 
 
 # =========================
-# 🔥 MARKET REGIME (SOFT)
+# 🔥 MARKET REGIME
 # =========================
 def market_regime(df_index):
 
@@ -86,27 +86,23 @@ def market_regime(df_index):
 
 
 # =========================
-# 🔥 REGIME CONFIG (KEY V4)
+# 🔥 REGIME CONFIG
 # =========================
 def regime_config(mode):
 
     if mode == "AGGRESSIVE":
         return {
-            "rs_threshold": -0.12,
             "position_scale": 1.0,
             "score_boost": 1.2
         }
 
     if mode == "NEUTRAL":
         return {
-            "rs_threshold": -0.07,
             "position_scale": 0.7,
             "score_boost": 1.0
         }
 
-    # DEFENSIVE
     return {
-        "rs_threshold": -0.03,
         "position_scale": 0.4,
         "score_boost": 0.8
     }
@@ -122,9 +118,6 @@ def main():
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
-    # =========================
-    # 🔥 MARKET (NO MORE STOP)
-    # =========================
     df_index = load_index()
 
     mode, m_score = market_regime(df_index)
@@ -132,7 +125,6 @@ def main():
 
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
-    # ❌ KHÔNG STOP nữa
     if mode == "DEFENSIVE":
         print("⚠️ DEFENSIVE MODE → giảm risk, không tắt bot")
 
@@ -162,7 +154,7 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 🔥 FILTER + SCORING
+    # 🔥 FULL SCORING (NO FILTER)
     # =========================
     scored = []
 
@@ -178,10 +170,6 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # 🔥 adaptive RS theo regime
-            if rs < cfg["rs_threshold"]:
-                continue
-
             score = (
                 rs * 2 +
                 voe * 1.5 +
@@ -192,6 +180,7 @@ def main():
                 (1 if acc else 0)
             )
 
+            # nonlinear boost
             score *= (1 + np.tanh(score))
 
             scored.append((symbol, score))
@@ -201,11 +190,8 @@ def main():
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    if not scored:
-        print("⚠️ NO LEADER → fallback")
-        leaders = leaders[:10]
-    else:
-        leaders = [s[0] for s in scored[:12]]
+    # 🔥 luôn giữ top N (không fallback cứng)
+    leaders = [s[0] for s in scored[:12]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
@@ -222,7 +208,8 @@ def main():
             df = load_stock_data(symbol)
             price = df["close"].iloc[-1]
 
-            ok, f = validate_entry(df, symbol)
+            # 🔥 truyền regime vào entry
+            ok, f = validate_entry(df, symbol, regime=mode)
 
             print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
 
@@ -231,21 +218,22 @@ def main():
                 continue
 
             # =========================
-            # MTF SOFT
+            # 🔥 MTF SCORE (KHÔNG BOOLEAN)
             # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
-                mtf_ok = mtf_confirm(df, df_h1) if df_h1 is not None else True
+                mtf_score = mtf_confirm(df, df_h1) if df_h1 is not None else 0
             except:
-                mtf_ok = True
+                mtf_score = 0
 
-            if not mtf_ok:
-                print("   ⚠️ MTF WEAK")
-
+            # =========================
+            # RR
+            # =========================
             rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
-            score = rr
-
+            # =========================
+            # TYPE WEIGHT
+            # =========================
             type_weight = {
                 "EARLY_BREAKOUT": 1.8,
                 "PRE": 1.6,
@@ -254,13 +242,25 @@ def main():
                 "PULLBACK": 1.1
             }
 
-            score *= type_weight.get(f["type"], 1.0)
+            base_score = rr * type_weight.get(f["type"], 1.0)
 
+            # =========================
+            # SYSTEM SCORE
+            # =========================
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            final_score = score * (1 + system_score * 0.1)
+            # =========================
+            # 🔥 FINAL SCORE (FULL STACK)
+            # =========================
+            final_score = base_score
 
-            # 🔥 regime scaling
+            # system strength
+            final_score *= (1 + system_score * 0.1)
+
+            # MTF boost (key fix)
+            final_score *= (1 + mtf_score * 0.3)
+
+            # regime boost
             final_score *= cfg["score_boost"]
 
             signals.append({
@@ -272,7 +272,8 @@ def main():
                 "rr": rr,
                 "type": f["type"],
                 "score": final_score,
-                "risk_scale": cfg["position_scale"]
+                "risk_scale": cfg["position_scale"],
+                "mtf_score": round(mtf_score, 2)
             })
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
@@ -300,6 +301,7 @@ def main():
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n"
+                f"MTF: {s['mtf_score']}\n"
                 f"Risk: x{s['risk_scale']}\n\n"
             )
 
