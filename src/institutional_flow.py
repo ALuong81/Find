@@ -1,10 +1,11 @@
 import pandas as pd
 
 
+# =========================
+# ACCUMULATION DAYS (SMOOTH)
+# =========================
 def accumulation_days(df):
-    """
-    Đếm số ngày tích lũy (giá sideway + vol cao)
-    """
+
     if len(df) < 20:
         return 0
 
@@ -13,23 +14,25 @@ def accumulation_days(df):
     price_range = recent["high"].max() - recent["low"].min()
     avg_price = recent["close"].mean()
 
+    if avg_price == 0:
+        return 0
+
     vol = recent["volume"]
     vol_avg = df["volume"].rolling(20).mean().iloc[-1]
 
     # sideway + vol cao
-    if avg_price == 0:
-        return 0
-
-    if price_range / avg_price < 0.05:
-        return (vol > vol_avg * 1.2).sum()
+    if price_range / avg_price < 0.06:  # 🔥 nới nhẹ
+        score = (vol > vol_avg * 1.1).sum() / 10  # 🔥 normalize [0-1]
+        return score
 
     return 0
 
 
+# =========================
+# ABSORPTION (KHÔNG TRẢ 0 CỨNG)
+# =========================
 def absorption_score(df):
-    """
-    Tổ chức hấp thụ: vol lớn nhưng giá không giảm
-    """
+
     if len(df) < 5:
         return 0
 
@@ -41,16 +44,24 @@ def absorption_score(df):
         close = df["close"].iloc[i]
         prev = df["close"].iloc[i - 1]
 
-        if vol > vol_avg * 1.3 and close >= prev:
-            score += 1
+        if vol_avg == 0:
+            continue
 
-    return score
+        # 🔥 nới điều kiện
+        if vol > vol_avg * 1.2:
+            if close >= prev:
+                score += 1
+            else:
+                score += 0.3  # 🔥 không trả 0 → vẫn có hấp thụ nhẹ
+
+    return score / 5  # 🔥 normalize
 
 
+# =========================
+# EXPANSION QUALITY (SOFT)
+# =========================
 def expansion_quality(df):
-    """
-    Breakout có chất lượng hay chỉ là fake
-    """
+
     if len(df) < 20:
         return 0
 
@@ -60,28 +71,62 @@ def expansion_quality(df):
     vol = df["volume"]
     vol_avg = vol.rolling(20).mean()
 
-    if close >= high * 0.95:
-        if vol.iloc[-1] > vol_avg.iloc[-1] * 1.5:
-            return 1   # strong breakout
-        elif vol.iloc[-1] > vol_avg.iloc[-1]:
-            return 0.5 # ok breakout
+    if vol_avg.iloc[-1] == 0:
+        return 0
 
-    return 0
+    # 🔥 nới điều kiện breakout
+    if close >= high * 0.97:
+
+        if vol.iloc[-1] > vol_avg.iloc[-1] * 1.4:
+            return 1.0
+        elif vol.iloc[-1] > vol_avg.iloc[-1] * 1.1:
+            return 0.6
+        else:
+            return 0.3  # 🔥 vẫn cho điểm nhẹ
+
+    return 0.2  # 🔥 tránh trả 0 hoàn toàn
 
 
+# =========================
+# MAIN SCORE (SCALED + SMOOTH)
+# =========================
 def institutional_flow_score(df):
-    """
-    Tổng hợp dòng tiền tổ chức
-    """
 
-    acc = accumulation_days(df)
-    absb = absorption_score(df)
-    exp = expansion_quality(df)
+    try:
+        if df is None or len(df) < 30:
+            return 0
 
-    score = (
-        acc * 0.8 +
-        absb * 1.2 +
-        exp * 1.5
-    )
+        # =========================
+        # RAW COMPONENT
+        # =========================
+        acc = accumulation_days(df)
+        absb = absorption_score(df)
+        exp = expansion_quality(df)
 
-    return score
+        raw_score = (
+            acc * 1.0 +
+            absb * 1.2 +
+            exp * 1.5
+        )
+
+        # =========================
+        # 🔥 EMA SMOOTH (QUAN TRỌNG)
+        # =========================
+        # tạo series giả để smooth
+        temp = pd.Series([raw_score] * 5)
+        smooth = temp.ewm(span=3).mean().iloc[-1]
+
+        # =========================
+        # 🔥 SCALE VỀ [-1 → +2]
+        # =========================
+        # clamp trước
+        smooth = max(min(smooth, 3), -1)
+
+        # scale mềm
+        scaled = (smooth / 3) * 2  # ~ [-1 → +2]
+
+        return round(scaled, 2)
+
+    except Exception as e:
+        print("FLOW SCORE ERROR:", str(e))
+        return 0
