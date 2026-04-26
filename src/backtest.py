@@ -35,7 +35,7 @@ def simulate_trade(df, entry, sl, tp):
 
 
 # =========================
-# PRELOAD ALL DATA (🔥 tối ưu)
+# PRELOAD DATA
 # =========================
 def preload_all(symbols):
 
@@ -48,7 +48,6 @@ def preload_all(symbols):
             if df is None or df.empty:
                 continue
 
-            # 🔥 FIX DATETIME TRIỆT ĐỂ
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             df = df.dropna(subset=["date"])
             df = df.sort_values("date")
@@ -62,6 +61,20 @@ def preload_all(symbols):
 
 
 # =========================
+# SAFE RR
+# =========================
+def calc_rr(entry, sl, tp):
+
+    risk = entry - sl
+    reward = tp - entry
+
+    if risk <= 0:
+        return 0
+
+    return reward / risk
+
+
+# =========================
 # BACKTEST
 # =========================
 def run_backtest(start_date="2023-01-01"):
@@ -71,7 +84,7 @@ def run_backtest(start_date="2023-01-01"):
     df_symbols = load_symbols()
     df_index_full = load_index()
 
-    # 🔥 FIX datetime index
+    # FIX datetime
     df_index_full["date"] = pd.to_datetime(df_index_full["date"], errors="coerce")
     df_index_full = df_index_full.dropna(subset=["date"])
     df_index_full = df_index_full.sort_values("date")
@@ -79,9 +92,9 @@ def run_backtest(start_date="2023-01-01"):
     equity = INITIAL_CAPITAL
     history = []
 
-    unique_dates = df_index_full["date"].unique()
+    unique_dates = sorted(df_index_full["date"].unique())
 
-    # 🔥 PRELOAD DATA 1 LẦN (cực quan trọng)
+    # 🔥 PRELOAD
     symbols_all = df_symbols["symbol"].tolist()
     data_map = preload_all(symbols_all)
 
@@ -91,19 +104,26 @@ def run_backtest(start_date="2023-01-01"):
             continue
 
         # =========================
-        # MARKET
+        # MARKET (NO LOOKAHEAD)
         # =========================
         df_index = df_index_full[df_index_full["date"] <= date]
 
-        m = market_score()
+        try:
+            m = market_score()
+        except:
+            continue
+
         if m < 0:
             continue
 
         # =========================
-        # SECTOR
+        # SECTOR (NO LOOKAHEAD)
         # =========================
-        sector_df = sector_money_flow(df_symbols)
-        sector_df = sector_rotation(sector_df)
+        try:
+            sector_df = sector_money_flow(df_symbols)
+            sector_df = sector_rotation(sector_df)
+        except:
+            continue
 
         top_sectors = sector_df.head(3)
 
@@ -128,7 +148,6 @@ def run_backtest(start_date="2023-01-01"):
 
             df_full = data_map[symbol]
 
-            # 🔥 NO LOOKAHEAD
             df = df_full[df_full["date"] <= date]
 
             if len(df) < 50:
@@ -201,20 +220,22 @@ def run_backtest(start_date="2023-01-01"):
             # =========================
             # POSITION SIZING
             # =========================
-            risk = equity * RISK_PER_TRADE
+            risk_amount = equity * RISK_PER_TRADE
+
+            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
             if result == 1:
-                rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
-                equity += risk * rr
+                equity += risk_amount * rr
 
             elif result == -1:
-                equity -= risk
+                equity -= risk_amount
 
             history.append({
                 "date": date,
                 "symbol": symbol,
                 "result": result,
-                "equity": equity
+                "equity": equity,
+                "rr": rr
             })
 
     return pd.DataFrame(history)
