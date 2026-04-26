@@ -88,8 +88,9 @@ def relative_strength(df_stock, df_index):
         if pd.isna(val) or np.isinf(val):
             return 0.0
 
-        rs_final = np.tanh(val)
-
+        #rs_final = np.tanh(val)
+        rs_final = np.tanh(val * 1.5)
+        
         return float(rs_final)
 
     except Exception as e:
