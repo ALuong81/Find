@@ -8,7 +8,7 @@ from early_breakout import detect_early_breakout
 from data_loader import load_stock_data_h1
 
 
-def validate_entry(df, symbol=None):
+def validate_entry(df, symbol=None, regime="NEUTRAL"):
 
     try:
         if df is None or len(df) < 50:
@@ -32,44 +32,43 @@ def validate_entry(df, symbol=None):
         tp2 = swing_high * 1.1
 
         # =========================
-        # 🔥 BREAKOUT TYPE (LẤY TRƯỚC)
+        # 🔥 BREAKOUT TYPE
         # =========================
         b_type = breakout_type(df)
 
         # =========================
-        # 🔥 PRE ƯU TIÊN TRƯỚC FILTER (QUAN TRỌNG)
-        # =========================
-        if b_type == "PRE":
-            if detect_accumulation(df):
-                if price <= swing_high * 1.03:
-                    return True, {
-                        "entry": price,
-                        "sl": sl,
-                        "tp1": tp1,
-                        "tp2": tp2,
-                        "type": "PRE"
-                    }
-
-        # =========================
-        # 🔥 SMART MONEY FILTER (SAU PRE)
+        # 🔥 SMART MONEY (NO HARD FILTER)
         # =========================
         flow = money_flow_score(df)
         inst = institutional_score(df)
         inst_flow = institutional_flow_score(df)
 
-        if flow <= 0:
-            print("DEBUG: weak flow")
-            return False, None
-
-        if inst < 0:
-            print("DEBUG: weak institution")
-            return False, None
-
-        # ❗ KHÔNG dùng inst_flow làm filter nữa
-        # chỉ dùng làm scoring bên ngoài
+        # =========================
+        # 🔥 SOFT SCORE (KEY FIX)
+        # =========================
+        sm_score = (
+            flow * 1.5 +
+            inst * 1.2 +
+            inst_flow * 1.8
+        )
 
         # =========================
-        # 🔥 EARLY BREAKOUT H1
+        # 🔥 REGIME ADAPTIVE THRESHOLD
+        # =========================
+        if regime == "AGGRESSIVE":
+            threshold = -1.5
+        elif regime == "NEUTRAL":
+            threshold = -0.5
+        else:  # DEFENSIVE
+            threshold = 0.2
+
+        # ❗ chỉ reject khi cực xấu
+        if sm_score < threshold:
+            print(f"DEBUG: weak SM score = {round(sm_score,2)}")
+            return False, None
+
+        # =========================
+        # 🔥 EARLY BREAKOUT H1 (TOP PRIORITY)
         # =========================
         if symbol:
             try:
@@ -83,47 +82,56 @@ def validate_entry(df, symbol=None):
                             "tp1": tp1,
                             "tp2": tp2,
                             "type": "EARLY_BREAKOUT",
-                            "flow": flow,
-                            "inst": inst,
-                            "inst_flow": inst_flow
+                            "sm_score": sm_score
                         }
             except Exception as e:
                 print("H1 ERROR:", str(e))
 
         # =========================
+        # 🔥 PRE (ưu tiên cao)
+        # =========================
+        if b_type == "PRE":
+            if detect_accumulation(df):
+                if price <= swing_high * 1.05:  # 🔥 nới thêm
+                    return True, {
+                        "entry": price,
+                        "sl": sl,
+                        "tp1": tp1,
+                        "tp2": tp2,
+                        "type": "PRE",
+                        "sm_score": sm_score
+                    }
+
+        # =========================
         # 🔥 EARLY
         # =========================
         if b_type == "EARLY":
-            if entry * 0.93 <= price <= entry * 1.07:
+            if entry * 0.9 <= price <= entry * 1.1:
                 return True, {
                     "entry": entry,
                     "sl": sl,
                     "tp1": tp1,
                     "tp2": tp2,
                     "type": "EARLY",
-                    "flow": flow,
-                    "inst": inst,
-                    "inst_flow": inst_flow
+                    "sm_score": sm_score
                 }
 
         # =========================
         # 🔥 STRONG
         # =========================
         if b_type == "STRONG":
-            if entry * 0.95 <= price <= entry * 1.05:
+            if entry * 0.93 <= price <= entry * 1.07:
                 return True, {
                     "entry": entry,
                     "sl": sl,
                     "tp1": tp1,
                     "tp2": tp2,
                     "type": "STRONG",
-                    "flow": flow,
-                    "inst": inst,
-                    "inst_flow": inst_flow
+                    "sm_score": sm_score
                 }
 
         # =========================
-        # 🔥 FALLBACK PRE (KHÔNG DÙNG inst_flow)
+        # 🔥 FALLBACK PRE
         # =========================
         if b_type is None:
             if detect_accumulation(df):
@@ -133,24 +141,20 @@ def validate_entry(df, symbol=None):
                     "tp1": tp1,
                     "tp2": tp2,
                     "type": "PRE",
-                    "flow": flow,
-                    "inst": inst,
-                    "inst_flow": inst_flow
+                    "sm_score": sm_score
                 }
 
         # =========================
-        # 🔥 SMART PULLBACK (NỚI + HỢP LÝ)
+        # 🔥 SMART PULLBACK (SOFT)
         # =========================
-        if entry * 0.9 <= price <= entry * 1.1:
+        if entry * 0.85 <= price <= entry * 1.15:
             return True, {
                 "entry": price,
                 "sl": sl,
                 "tp1": tp1,
                 "tp2": tp2,
                 "type": "PULLBACK",
-                "flow": flow,
-                "inst": inst,
-                "inst_flow": inst_flow
+                "sm_score": sm_score
             }
 
         return False, None
