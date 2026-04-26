@@ -31,7 +31,7 @@ def fetch_incremental(symbol, start, end):
 
 
 # =========================
-# 🔥 NORMALIZE (FIX FULL)
+# 🔥 NORMALIZE (FIX TRIỆT ĐỂ TZ)
 # =========================
 def normalize(df):
 
@@ -46,19 +46,20 @@ def normalize(df):
     try:
         df = df.rename(columns={"time": "date"})
 
-        # 🔥 chuẩn hóa datetime TRIỆT ĐỂ
+        # 🔥 FIX TZ TRIỆT ĐỂ
         df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
         df["date"] = df["date"].dt.tz_convert(None)
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
 
         df = df.dropna(subset=["date"])
 
-        # 🔥 ép numeric tránh lỗi string
+        # 🔥 ép numeric
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
         df = df.dropna(subset=["close", "volume"])
 
-        # 🔥 sort + dedup tại normalize luôn
+        # 🔥 sort + dedup
         df = df.sort_values("date")
         df = df.drop_duplicates(subset=["date"], keep="last")
 
@@ -69,13 +70,14 @@ def normalize(df):
 
 
 # =========================
-# 🔥 CLEAN OLD DATA
+# 🔥 CLEAN OLD (FIX TZ)
 # =========================
 def clean_old(df):
 
     try:
         df["date"] = pd.to_datetime(df["date"], errors="coerce", utc=True)
         df["date"] = df["date"].dt.tz_convert(None)
+        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
 
         df = df.dropna(subset=["date"])
 
@@ -123,10 +125,15 @@ def update_symbol(symbol):
             df = normalize(load_stock_data(symbol))
             return symbol, df
 
-        last_date = df_old["date"].max()
+        # =========================
+        # 🔥 FIX TZ SO SÁNH
+        # =========================
+        last_date = pd.to_datetime(df_old["date"].max(), errors="coerce")
 
         start = last_date + pd.Timedelta(days=1)
-        end = pd.Timestamp.utcnow().normalize()
+
+        # 🔥 FIX CHÍNH: dùng tz-naive
+        end = pd.Timestamp.today().normalize()
 
         # =========================
         # NO UPDATE
@@ -146,7 +153,7 @@ def update_symbol(symbol):
             return symbol, df_old
 
         # =========================
-        # MERGE + FIX DUPLICATE TRIỆT ĐỂ
+        # MERGE + CLEAN
         # =========================
         df = pd.concat([df_old, new_df], ignore_index=True)
 
@@ -177,7 +184,7 @@ def main():
     df_top = rank_liquidity(df_symbols, top_n=50)
 
     # =========================
-    # 🔥 SAFE SYMBOL LIST
+    # SAFE SYMBOL LIST
     # =========================
     if df_top is None or df_top.empty or "symbol" not in df_top.columns:
         print("⚠️ LIQUIDITY EMPTY → fallback ALL")
@@ -196,7 +203,7 @@ def main():
     fail = 0
 
     # =========================
-    # MULTI THREAD (SAFE)
+    # MULTI THREAD
     # =========================
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
