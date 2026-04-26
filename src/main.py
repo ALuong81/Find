@@ -14,6 +14,7 @@ from voe import voe_score
 from accumulation import detect_accumulation
 
 from institutional import institutional_score
+from institutional_flow import institutional_flow_score  # 🔥 NEW
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 from market_mode import get_market_mode
@@ -98,7 +99,7 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # FILTER (SMART MONEY SCORING)
+    # FILTER + SCORING
     # =========================
     df_index = load_index()
     scored = []
@@ -110,41 +111,47 @@ def main():
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
             inst = institutional_score(df)
+            inst_flow = institutional_flow_score(df)  # 🔥 NEW
             mf = money_flow_score(df)
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
             # =========================
-            # 🔥 REGIME ADAPTIVE FILTER
+            # 🔥 REGIME FILTER (NỚI)
             # =========================
             if mode == "SAFE":
                 rs_cond = rs > -0.02
             else:
-                rs_cond = rs > -0.08
+                rs_cond = rs > -0.10   # 🔥 nới thêm
 
             if not rs_cond:
                 continue
 
             # =========================
-            # 🔥 SCORING UPGRADE
+            # 🔥 SCORING (UPGRADE)
             # =========================
             score = (
                 rs * 2 +
                 voe * 1.5 +
                 inst * 1.5 +
+                inst_flow * 1.5 +   # 🔥 ADD
                 mf * 1.2 +
                 (1 if acc else 0)
             )
 
-            # 🔥 FLOW TIMELINE BOOST
+            # 🔥 FLOW TIMELINE
             score += flow_acc * 1.2
 
             # 🔥 MOMENTUM BOOST
             if rs > 0:
                 score *= 1.1
 
-            # 🔥 STRONG FLOW BONUS
+            # 🔥 MONEY FLOW BOOST
             if mf > 1:
+                score *= 1.1
+
+            # 🔥 STRONG INSTITUTION BONUS
+            if inst_flow > 1:
                 score *= 1.1
 
             scored.append((symbol, score))
@@ -155,7 +162,7 @@ def main():
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
     # =========================
-    # LEADER SELECT (FIX NGHẼN)
+    # LEADER SELECT
     # =========================
     if not scored:
         print("⚠️ NO STRONG LEADER → fallback")
@@ -190,7 +197,7 @@ def main():
                 continue
 
             # =========================
-            # 🔥 MTF CONFIRM (SOFT)
+            # 🔥 MTF CONFIRM (KHÔNG GIẾT TÍN HIỆU)
             # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
@@ -202,12 +209,14 @@ def main():
                     if not mtf_confirm(df, df_h1):
                         print("   ❌ MTF FAIL")
                         continue
+                else:
+                    print("   ⚠️ NO H1 → PASS")  # 🔥 FIX
 
             # =========================
-            # 🔥 AGGRESSIVE FILTER
+            # 🔥 AGGRESSIVE FILTER (NỚI)
             # =========================
             if mode == "AGGRESSIVE":
-                if abs(price - f["entry"]) / f["entry"] > 0.08:
+                if abs(price - f["entry"]) / f["entry"] > 0.10:  # 🔥 nới 0.08 → 0.10
                     print("   ❌ too far")
                     continue
 
@@ -216,12 +225,12 @@ def main():
             score = rr
 
             # =========================
-            # 🔥 TYPE BOOST
+            # 🔥 TYPE BOOST (RE-ORDER)
             # =========================
             if f["type"] == "EARLY_BREAKOUT":
                 score *= 1.8
             elif f["type"] == "PRE":
-                score *= 1.5
+                score *= 1.6   # 🔥 tăng
             elif f["type"] == "EARLY":
                 score *= 1.3
             elif f["type"] == "STRONG":
