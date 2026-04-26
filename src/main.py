@@ -85,7 +85,7 @@ def main():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
     # =========================
-    # LEADERS
+    # LEADERS RAW
     # =========================
     leaders = []
 
@@ -98,7 +98,7 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # FILTER (SMART MONEY)
+    # FILTER (SMART MONEY SCORING)
     # =========================
     df_index = load_index()
     scored = []
@@ -114,25 +114,40 @@ def main():
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # 🔥 AUTO MODE FILTER (nới nhẹ)
+            # =========================
+            # 🔥 REGIME ADAPTIVE FILTER
+            # =========================
             if mode == "SAFE":
-                rs_cond = rs > -0.03
+                rs_cond = rs > -0.02
             else:
                 rs_cond = rs > -0.08
 
-            if rs_cond:
+            if not rs_cond:
+                continue
 
-                score = (
-                    rs * 2 +
-                    voe * 1.5 +
-                    inst * 1.5 +
-                    mf * 1.2 +
-                    (1 if acc else 0)
-                )
+            # =========================
+            # 🔥 SCORING UPGRADE
+            # =========================
+            score = (
+                rs * 2 +
+                voe * 1.5 +
+                inst * 1.5 +
+                mf * 1.2 +
+                (1 if acc else 0)
+            )
 
-                score += flow_acc * 1.0
+            # 🔥 FLOW TIMELINE BOOST
+            score += flow_acc * 1.2
 
-                scored.append((symbol, score))
+            # 🔥 MOMENTUM BOOST
+            if rs > 0:
+                score *= 1.1
+
+            # 🔥 STRONG FLOW BONUS
+            if mf > 1:
+                score *= 1.1
+
+            scored.append((symbol, score))
 
         except Exception as e:
             print(symbol, "FILTER ERROR:", str(e))
@@ -166,70 +181,72 @@ def main():
             df = load_stock_data(symbol)
             price = df["close"].iloc[-1]
 
-            ok, f = validate_entry(df)
+            ok, f = validate_entry(df, symbol)
 
             print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
 
-            if ok:
+            if not ok:
+                print("   ❌ skip")
+                continue
 
-                # =========================
-                # 🔥 LOAD H1 (SAFE LOAD)
-                # =========================
-                try:
-                    df_h1 = load_stock_data_h1(symbol)
-                except:
-                    df_h1 = None
+            # =========================
+            # 🔥 MTF CONFIRM (SOFT)
+            # =========================
+            try:
+                df_h1 = load_stock_data_h1(symbol)
+            except:
+                df_h1 = None
 
-                # =========================
-                # 🔥 MTF CONFIRM (KHÔNG GIẾT TÍN HIỆU)
-                # =========================
-                if f["type"] in ["EARLY", "PRE"]:
-                    if df_h1 is not None:
-                        if not mtf_confirm(df, df_h1):
-                            print("   ❌ MTF FAIL")
-                            continue
-                    else:
-                        print("   ⚠️ NO H1 DATA → SKIP MTF")
-
-                # =========================
-                # 🔥 AGGRESSIVE FILTER
-                # =========================
-                if mode == "AGGRESSIVE":
-                    if abs(price - f["entry"]) / f["entry"] > 0.07:
-                        print("   ❌ too far")
+            if f["type"] in ["EARLY", "PRE"]:
+                if df_h1 is not None:
+                    if not mtf_confirm(df, df_h1):
+                        print("   ❌ MTF FAIL")
                         continue
 
-                rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
+            # =========================
+            # 🔥 AGGRESSIVE FILTER
+            # =========================
+            if mode == "AGGRESSIVE":
+                if abs(price - f["entry"]) / f["entry"] > 0.08:
+                    print("   ❌ too far")
+                    continue
 
-                score = rr
+            rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
-                if f["type"] == "PRE":
-                    score *= 1.6
-                elif f["type"] == "EARLY":
-                    score *= 1.3
-                elif f["type"] == "STRONG":
-                    score *= 1.0
+            score = rr
 
-                if mode == "AGGRESSIVE":
-                    score *= 1.2
+            # =========================
+            # 🔥 TYPE BOOST
+            # =========================
+            if f["type"] == "EARLY_BREAKOUT":
+                score *= 1.8
+            elif f["type"] == "PRE":
+                score *= 1.5
+            elif f["type"] == "EARLY":
+                score *= 1.3
+            elif f["type"] == "STRONG":
+                score *= 1.0
+            elif f["type"] == "PULLBACK":
+                score *= 1.1
 
-                signals.append({
-                    "symbol": symbol,
-                    "entry": f["entry"],
-                    "sl": f["sl"],
-                    "tp1": f["tp1"],
-                    "tp2": f["tp2"],
-                    "rr": rr,
-                    "type": f["type"],
-                    "score": score
-                })
+            # 🔥 REGIME BOOST
+            if mode == "AGGRESSIVE":
+                score *= 1.2
 
-                log_trade(symbol, f["entry"], f["sl"], f["tp1"])
+            signals.append({
+                "symbol": symbol,
+                "entry": f["entry"],
+                "sl": f["sl"],
+                "tp1": f["tp1"],
+                "tp2": f["tp2"],
+                "rr": rr,
+                "type": f["type"],
+                "score": score
+            })
 
-                print("   ✅ SIGNAL")
+            log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            else:
-                print("   ❌ skip")
+            print("   ✅ SIGNAL")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
