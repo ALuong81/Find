@@ -39,7 +39,7 @@ def detect_hvn(df):
 
 
 # =========================
-# 3. IMBALANCE (CONTINUOUS)
+# 3. IMBALANCE (IMPROVED)
 # =========================
 def detect_imbalance(df):
 
@@ -50,19 +50,22 @@ def detect_imbalance(df):
     up_vol = vol[close > open_].sum()
     down_vol = vol[close < open_].sum()
 
-    if down_vol == 0:
-        return 2.0  # cực mạnh
+    total = up_vol + down_vol
 
-    ratio = up_vol / down_vol
+    if total == 0:
+        return 0
 
-    # 🔥 scale về ~[-1 → +2]
-    score = np.tanh((ratio - 1) * 1.5) * 2
+    # 🔥 normalize ratio → tránh explode
+    imbalance = (up_vol - down_vol) / total
+
+    # 🔥 scale mượt hơn (không bị spike)
+    score = np.tanh(imbalance * 3)
 
     return score
 
 
 # =========================
-# 4. ACCUMULATION ZONE (SOFT)
+# 4. ACCUMULATION (SOFT + STABLE)
 # =========================
 def accumulation_score(df):
 
@@ -75,22 +78,24 @@ def accumulation_score(df):
 
     dist = abs(price - hvn) / hvn
 
-    # 🔥 càng gần HVN → score cao
-    score = 1 - (dist / 0.05)
+    # 🔥 vùng tốt: <3%
+    if dist < 0.03:
+        score = 1 - (dist / 0.03)
+    else:
+        score = - (dist - 0.03) * 5  # penalize nhẹ
 
     return np.clip(score, -1, 1)
 
 
 # =========================
-# 5. EMA SMOOTH
+# 5. EMA SMOOTH (FAST)
 # =========================
-def ema_smooth(series, span=5):
-
+def ema_smooth(series, span=3):  # 🔥 giảm lag
     return series.ewm(span=span, adjust=False).mean().iloc[-1]
 
 
 # =========================
-# 6. MONEY FLOW SCORE (V4)
+# 6. MONEY FLOW SCORE V4 FINAL
 # =========================
 def money_flow_score(df):
 
@@ -99,42 +104,42 @@ def money_flow_score(df):
             return 0
 
         # =========================
-        # RAW COMPONENTS
+        # BUILD SERIES (LIGHTWEIGHT)
         # =========================
-        imbalance_raw = detect_imbalance(df)
-        acc_raw = accumulation_score(df)
+        imbalance_series = []
+        acc_series = []
+
+        for i in range(25, len(df)):
+            sub = df.iloc[:i]
+
+            imbalance_series.append(detect_imbalance(sub))
+            acc_series.append(accumulation_score(sub))
+
+        if len(imbalance_series) < 5:
+            return 0
+
+        imbalance_series = pd.Series(imbalance_series)
+        acc_series = pd.Series(acc_series)
 
         # =========================
-        # BUILD SERIES FOR SMOOTH
+        # 🔥 FAST SMOOTH
         # =========================
-        imbalance_series = pd.Series(
-            [detect_imbalance(df.iloc[:i]) for i in range(20, len(df))]
-        )
-
-        acc_series = pd.Series(
-            [accumulation_score(df.iloc[:i]) for i in range(20, len(df))]
-        )
+        imbalance = ema_smooth(imbalance_series, span=3)
+        acc = ema_smooth(acc_series, span=3)
 
         # =========================
-        # EMA SMOOTH
-        # =========================
-        imbalance = ema_smooth(imbalance_series)
-        acc = ema_smooth(acc_series)
-
-        # =========================
-        # FINAL SCORE
+        # 🔥 FINAL SCORE (REBALANCED)
         # =========================
         score = (
-            imbalance * 1.5 +
-            acc * 1.2
+            imbalance * 1.3 +
+            acc * 1.1
         )
 
-        # 🔥 normalize về [-1 → +2]
-        score = np.tanh(score) * 2
+        # 🔥 expand range (tránh bị bóp nhỏ)
+        score = np.tanh(score * 1.5) * 2
 
         return score
 
     except Exception as e:
         print("FLOW ERROR:", str(e))
         return 0
-    
