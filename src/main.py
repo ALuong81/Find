@@ -20,6 +20,9 @@ from flow_timeline import flow_timeline
 from mtf_confirm import mtf_confirm
 from tracker import log_trade
 
+# 🔥 NEW: risk engine
+from risk_engine import position_size
+
 import os
 import requests
 import numpy as np
@@ -180,7 +183,6 @@ def main():
                 (1 if acc else 0)
             )
 
-            # nonlinear boost
             score *= (1 + np.tanh(score))
 
             scored.append((symbol, score))
@@ -199,11 +201,13 @@ def main():
     print("\n🔥 STRONG LEADERS:", leaders)
 
     # =========================
-    # ENTRY (NO HARD FILTER)
+    # ENTRY
     # =========================
     print("\nSCAN ENTRY...\n")
 
     signals = []
+
+    equity = 100000  # 🔥 capital (sau này thay bằng account thật)
 
     for symbol in leaders:
 
@@ -212,8 +216,6 @@ def main():
 
             if df is None or len(df) < 50:
                 continue
-
-            price = df["close"].iloc[-1]
 
             ok, f = validate_entry(df, symbol, regime=mode)
 
@@ -239,8 +241,6 @@ def main():
                 continue
 
             rr = reward / risk
-
-            # clamp RR tránh outlier phá hệ
             rr = min(rr, 5)
 
             # =========================
@@ -256,26 +256,20 @@ def main():
 
             base_score = rr * type_weight.get(f["type"], 1.0)
 
-            # =========================
-            # SYSTEM SCORE
-            # =========================
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
             # =========================
-            # FINAL SCORE (FULL STACK)
+            # FINAL SCORE
             # =========================
             final_score = base_score
-
-            # system strength
             final_score *= (1 + system_score * 0.1)
-
-            # MTF boost
             final_score *= (1 + mtf_score * 0.3)
-
-            # regime boost
             final_score *= cfg["score_boost"]
 
-            signals.append({
+            # =========================
+            # 🔥 ADD RISK ENGINE (ONLY ADD)
+            # =========================
+            signal = {
                 "symbol": symbol,
                 "entry": f["entry"],
                 "sl": f["sl"],
@@ -286,11 +280,23 @@ def main():
                 "score": final_score,
                 "risk_scale": cfg["position_scale"],
                 "mtf_score": round(mtf_score, 2)
+            }
+
+            # 👉 NEW
+            size = position_size(equity, signal, mode)
+
+            risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
+
+            signal.update({
+                "size": round(size, 2),
+                "risk_pct": round(risk_pct, 4)
             })
+
+            signals.append(signal)
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            print(f"{symbol} ✅ score={round(final_score,2)}")
+            print(f"{symbol} ✅ score={round(final_score,2)} size={round(size,2)}")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
@@ -309,7 +315,7 @@ def main():
 
         msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
 
-        for s in signals[:10]:  # 🔥 chỉ gửi top 10
+        for s in signals[:10]:
             msg += (
                 f"{s['symbol']} ({s['type']})\n"
                 f"Entry: {round(s['entry'],2)}\n"
@@ -317,7 +323,8 @@ def main():
                 f"TP1: {round(s['tp1'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n"
                 f"MTF: {s['mtf_score']}\n"
-                f"Risk: x{s['risk_scale']}\n\n"
+                f"Size: {s['size']}\n"
+                f"Risk: {s['risk_pct']*100:.2f}%\n\n"
             )
 
         send_telegram(msg)
