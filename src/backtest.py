@@ -1,19 +1,53 @@
 import pandas as pd
+import numpy as np
+
 from data_loader import load_stock_data, load_index
 from symbol_loader import load_symbols
 
-from smart_money import market_score, sector_money_flow, pick_leaders
+from smart_money import sector_money_flow, pick_leaders
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
 from entry import validate_entry
 from voe import voe_score
 from accumulation import detect_accumulation
 from institutional import institutional_score
+from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
+from flow_timeline import flow_timeline
+
 
 INITIAL_CAPITAL = 100000
-RISK_PER_TRADE = 0.02
 MAX_HOLD_DAYS = 10
+
+
+# =========================
+# 🔥 MARKET REGIME V4
+# =========================
+def market_regime(df_index):
+
+    close = df_index["close"]
+
+    ret_5 = close.pct_change(5).iloc[-1]
+    ret_20 = close.pct_change(20).iloc[-1]
+    vol = close.pct_change().rolling(20).std().iloc[-1]
+
+    trend = close.rolling(20).mean().iloc[-1] - close.rolling(50).mean().iloc[-1]
+
+    score = (
+        ret_5 * 2 +
+        ret_20 * 1.5 -
+        vol * 2 +
+        (1 if trend > 0 else -1)
+    )
+
+    score = np.tanh(score * 3)
+
+    if score > 0.3:
+        return "AGGRESSIVE", score
+    elif score > -0.2:
+        return "NEUTRAL", score
+    else:
+        return "DEFENSIVE", score
 
 
 # =========================
@@ -35,7 +69,7 @@ def simulate_trade(df, entry, sl, tp):
 
 
 # =========================
-# PRELOAD DATA
+# PRELOAD
 # =========================
 def preload_all(symbols):
 
@@ -61,7 +95,7 @@ def preload_all(symbols):
 
 
 # =========================
-# SAFE RR
+# RR
 # =========================
 def calc_rr(entry, sl, tp):
 
@@ -75,7 +109,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST
+# BACKTEST V4
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -84,7 +118,6 @@ def run_backtest(start_date="2023-01-01"):
     df_symbols = load_symbols()
     df_index_full = load_index()
 
-    # FIX datetime
     df_index_full["date"] = pd.to_datetime(df_index_full["date"], errors="coerce")
     df_index_full = df_index_full.dropna(subset=["date"])
     df_index_full = df_index_full.sort_values("date")
@@ -94,7 +127,6 @@ def run_backtest(start_date="2023-01-01"):
 
     unique_dates = sorted(df_index_full["date"].unique())
 
-    # 🔥 PRELOAD
     symbols_all = df_symbols["symbol"].tolist()
     data_map = preload_all(symbols_all)
 
@@ -104,20 +136,30 @@ def run_backtest(start_date="2023-01-01"):
             continue
 
         # =========================
-        # MARKET (NO LOOKAHEAD)
+        # 🔥 MARKET REGIME
         # =========================
         df_index = df_index_full[df_index_full["date"] <= date]
 
-        try:
-            m = market_score()
-        except:
+        if len(df_index) < 50:
             continue
 
-        if m < 0:
-            continue
+        mode, m_score = market_regime(df_index)
 
         # =========================
-        # SECTOR (NO LOOKAHEAD)
+        # 🔥 POSITION SIZE BY REGIME
+        # =========================
+        if mode == "AGGRESSIVE":
+            risk_pct = 0.025
+            score_threshold = -0.5
+        elif mode == "NEUTRAL":
+            risk_pct = 0.015
+            score_threshold = -0.2
+        else:
+            risk_pct = 0.007
+            score_threshold = 0.0
+
+        # =========================
+        # SECTOR
         # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
@@ -137,7 +179,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # FILTER
+        # 🔥 SCORING V4
         # =========================
         scored = []
 
@@ -147,7 +189,6 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             df_full = data_map[symbol]
-
             df = df_full[df_full["date"] <= date]
 
             if len(df) < 50:
@@ -157,19 +198,25 @@ def run_backtest(start_date="2023-01-01"):
                 rs = relative_strength(df, df_index)
                 voe = voe_score(df, df_index)
                 inst = institutional_score(df)
+                inst_flow = institutional_flow_score(df)
                 mf = money_flow_score(df)
+                flow_acc = flow_timeline(df)
                 acc = detect_accumulation(df)
 
-                if rs > -0.05:
+                score = (
+                    rs * 2 +
+                    voe * 1.5 +
+                    inst * 1.2 +
+                    inst_flow * 1.8 +
+                    mf * 1.3 +
+                    flow_acc * 1.2 +
+                    (1 if acc else 0)
+                )
 
-                    score = (
-                        rs * 2 +
-                        voe * 1.5 +
-                        inst * 1.5 +
-                        mf * 1.2 +
-                        (1 if acc else 0)
-                    )
+                # 🔥 nonlinear boost
+                score *= (1 + np.tanh(score))
 
+                if score > score_threshold:
                     scored.append((symbol, score))
 
             except:
@@ -191,7 +238,6 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             df_full = data_map[symbol]
-
             df = df_full[df_full["date"] <= date]
 
             if len(df) < 50:
@@ -202,9 +248,6 @@ def run_backtest(start_date="2023-01-01"):
             if not ok:
                 continue
 
-            # =========================
-            # FUTURE DATA
-            # =========================
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
 
             if future_df.empty:
@@ -217,16 +260,15 @@ def run_backtest(start_date="2023-01-01"):
                 f["tp1"]
             )
 
-            # =========================
-            # POSITION SIZING
-            # =========================
-            risk_amount = equity * RISK_PER_TRADE
-
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
+
+            # =========================
+            # 🔥 POSITION SIZING
+            # =========================
+            risk_amount = equity * risk_pct
 
             if result == 1:
                 equity += risk_amount * rr
-
             elif result == -1:
                 equity -= risk_amount
 
@@ -235,7 +277,8 @@ def run_backtest(start_date="2023-01-01"):
                 "symbol": symbol,
                 "result": result,
                 "equity": equity,
-                "rr": rr
+                "rr": rr,
+                "regime": mode
             })
 
     return pd.DataFrame(history)
