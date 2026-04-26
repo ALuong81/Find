@@ -2,35 +2,30 @@ name: Find Bot
 
 on:
   schedule:
-    # 🇻🇳 08:30 → preload
     - cron: "30 1 * * 1-5"
-
-    # 🇻🇳 09:30 → run bot
     - cron: "30 2 * * 1-5"
-
-    # 🇻🇳 11:00
     - cron: "0 4 * * 1-5"
-
-    # 🇻🇳 14:30
     - cron: "30 7 * * 1-5"
-
-    # 🇻🇳 16:00 → backtest
     - cron: "0 9 * * 1-5"
 
   workflow_dispatch:
 
+# 🔥 tránh chạy trùng job
+concurrency:
+  group: find-bot-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
 
-  # =========================
-  # PRELOAD DATA → PUSH DATA BRANCH
-  # =========================
+# =========================
+# PRELOAD
+# =========================
   preload:
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event.schedule == '30 1 * * 1-5'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 15
     permissions:
       contents: write
 
@@ -40,33 +35,57 @@ jobs:
       - name: Install
         run: pip install vnstock pandas
 
+      # 🔥 cache theo ngày → tránh stale
+      - name: Restore market cache
+        uses: actions/cache@v3
+        with:
+          path: data/market
+          key: market-${{ runner.os }}-${{ github.run_date }}
+          restore-keys: |
+            market-${{ runner.os }}-
+
       - name: Preload data
         run: python src/preload_data.py
 
-      # 🔥 COMMIT DATA (FIX FULL)
-      - name: Commit to data branch
+      - name: Save market cache
+        uses: actions/cache@v3
+        with:
+          path: data/market
+          key: market-${{ runner.os }}-${{ github.run_date }}
+
+      # 🔥 WORKTREE PUSH (SAFE)
+      - name: Push data via worktree
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
 
           git fetch origin
 
-          # 🔥 FIX CONFLICT branch vs folder
+          # 🔥 clean worktree cũ nếu có
+          rm -rf data-wt || true
+
           if git ls-remote --exit-code --heads origin data; then
-            git checkout -B data origin/data
+            git worktree add data-wt origin/data
           else
-            git checkout -b data
+            git worktree add -b data data-wt
           fi
 
-          git add data/market/ data/liquidity.csv || true
-          git commit -m "update market data" || echo "no change"
+          mkdir -p data-wt/data/market
+          rsync -av --delete data/market/ data-wt/data/market/ || true
+          cp data/liquidity.csv data-wt/data/ || true
 
-          git push -u origin data || git push origin data
+          cd data-wt
+
+          git add .
+          git commit -m "update market data $(date)" || echo "no change"
+
+          git pull --rebase origin data || true
+          git push origin data
 
 
-  # =========================
-  # RUN BOT → READ DATA BRANCH
-  # =========================
+# =========================
+# RUN BOT
+# =========================
   run:
     if: |
       github.event_name == 'workflow_dispatch' ||
@@ -74,20 +93,29 @@ jobs:
       github.event.schedule == '0 4 * * 1-5' ||
       github.event.schedule == '30 7 * * 1-5'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     permissions:
       contents: read
 
     steps:
       - uses: actions/checkout@v3
 
-      # 🔥 KHÔNG CRASH nếu chưa có branch
-      - name: Checkout data branch
-        continue-on-error: true
-        uses: actions/checkout@v3
+      - name: Restore market cache
+        uses: actions/cache@v3
         with:
-          ref: data
-          path: data-branch
+          path: data/market
+          key: market-${{ runner.os }}-${{ github.run_date }}
+          restore-keys: |
+            market-${{ runner.os }}-
+
+      # 🔥 fallback nếu cache miss
+      - name: Fallback load data branch
+        run: |
+          if [ ! -d "data/market" ] || [ -z "$(ls -A data/market)" ]; then
+            echo "⚠️ CACHE MISS → LOAD FROM DATA BRANCH"
+            git clone --depth=1 --branch data https://github.com/${{ github.repository }} data-tmp || true
+            cp -r data-tmp/data/market data/ || true
+          fi
 
       - name: Install
         run: pip install vnstock pandas requests
@@ -99,8 +127,7 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-        run: |
-          python src/main.py 2>&1 | tee logs/run.log
+        run: python src/main.py 2>&1 | tee logs/run.log
 
       - name: Upload log
         uses: actions/upload-artifact@v4
@@ -109,20 +136,28 @@ jobs:
           path: logs/run.log
 
 
-  # =========================
-  # BACKTEST → PUSH DATA BRANCH
-  # =========================
+# =========================
+# BACKTEST
+# =========================
   backtest:
     if: |
       github.event_name == 'workflow_dispatch' ||
       github.event.schedule == '0 9 * * 1-5'
     runs-on: ubuntu-latest
-
+    timeout-minutes: 20
     permissions:
       contents: write
 
     steps:
       - uses: actions/checkout@v3
+
+      - name: Restore market cache
+        uses: actions/cache@v3
+        with:
+          path: data/market
+          key: market-${{ runner.os }}-${{ github.run_date }}
+          restore-keys: |
+            market-${{ runner.os }}-
 
       - name: Install
         run: pip install vnstock pandas numpy
@@ -131,8 +166,7 @@ jobs:
         run: mkdir -p logs
 
       - name: Run backtest
-        run: |
-          python src/run_backtest.py 2>&1 | tee logs/backtest.log
+        run: python src/run_backtest.py 2>&1 | tee logs/backtest.log
 
       - name: Upload backtest log
         uses: actions/upload-artifact@v4
@@ -140,21 +174,27 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      # 🔥 COMMIT BACKTEST (FIX FULL)
-      - name: Commit backtest to data branch
+      # 🔥 PUSH RESULT
+      - name: Push backtest result via worktree
         run: |
           git config --global user.name "bot"
           git config --global user.email "bot@bot.com"
 
           git fetch origin
+          rm -rf data-wt || true
 
           if git ls-remote --exit-code --heads origin data; then
-            git checkout -B data origin/data
+            git worktree add data-wt origin/data
           else
-            git checkout -b data
+            git worktree add -b data data-wt
           fi
 
-          git add backtest_result.csv || true
-          git commit -m "update backtest result" || echo "no change"
+          cp backtest_result.csv data-wt/ || true
 
-          git push -u origin data || git push origin data
+          cd data-wt
+
+          git add .
+          git commit -m "update backtest $(date)" || echo "no change"
+
+          git pull --rebase origin data || true
+          git push origin data
