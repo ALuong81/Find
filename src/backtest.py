@@ -18,10 +18,11 @@ from flow_timeline import flow_timeline
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
+MAX_TRADES_PER_DAY = 2  # 🔥 LIMIT TRADE
 
 
 # =========================
-# 🔥 MARKET REGIME V4
+# 🔥 MARKET REGIME
 # =========================
 def market_regime(df_index):
 
@@ -61,13 +62,13 @@ def simulate_trade(df, entry, sl, tp):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # 🔥 ưu tiên gap open
+        # 🔥 GAP LOGIC
         if o <= sl:
             return -1
         if o >= tp:
             return 1
 
-        # 🔥 nếu cả TP và SL cùng bị hit → assume SL hit trước (conservative)
+        # 🔥 BOTH HIT → CONSERVATIVE (SL first)
         if l <= sl and h >= tp:
             return -1
 
@@ -121,7 +122,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST V4 FINAL
+# 🔥 BACKTEST FINAL FIXED
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -152,7 +153,7 @@ def run_backtest(start_date="2023-01-01"):
         if len(df_index) < 50:
             continue
 
-        mode, m_score = market_regime(df_index)
+        mode, _ = market_regime(df_index)
 
         # =========================
         # ❌ NO TRADE IN DEFENSIVE
@@ -166,7 +167,7 @@ def run_backtest(start_date="2023-01-01"):
         if mode == "AGGRESSIVE":
             risk_pct = 0.025
             score_threshold = -0.5
-        else:  # NEUTRAL
+        else:
             risk_pct = 0.015
             score_threshold = -0.2
 
@@ -191,7 +192,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # 🔥 SCORING (SYNC LIVE)
+        # 🔥 SCORING
         # =========================
         scored = []
 
@@ -225,7 +226,6 @@ def run_backtest(start_date="2023-01-01"):
                     (1 if acc else 0)
                 )
 
-                # 🔥 nonlinear boost (giống live)
                 score *= (1 + np.tanh(score))
 
                 if score > score_threshold:
@@ -239,12 +239,18 @@ def run_backtest(start_date="2023-01-01"):
         if not scored:
             continue
 
+        # 🔥 chỉ lấy top chất lượng
         leaders = [s[0] for s in scored[:5]]
 
         # =========================
-        # ENTRY
+        # ENTRY + LIMIT TRADE
         # =========================
+        trades_today = 0
+
         for symbol in leaders:
+
+            if trades_today >= MAX_TRADES_PER_DAY:
+                break
 
             if symbol not in data_map:
                 continue
@@ -255,9 +261,17 @@ def run_backtest(start_date="2023-01-01"):
             if len(df) < 50:
                 continue
 
-            ok, f = validate_entry(df, symbol)
+            ok, f = validate_entry(df, symbol, regime=mode)
 
             if not ok:
+                continue
+
+            # =========================
+            # 🔥 RR FILTER
+            # =========================
+            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
+
+            if rr < 1.0:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -271,8 +285,6 @@ def run_backtest(start_date="2023-01-01"):
                 f["sl"],
                 f["tp1"]
             )
-
-            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
             # =========================
             # 🔥 POSITION SIZING
@@ -292,5 +304,7 @@ def run_backtest(start_date="2023-01-01"):
                 "rr": rr,
                 "regime": mode
             })
+
+            trades_today += 1  # 🔥 increment
 
     return pd.DataFrame(history)
