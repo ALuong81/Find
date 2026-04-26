@@ -1,8 +1,18 @@
 import pandas as pd
+import numpy as np
 
 
 # =========================
-# ACCUMULATION DAYS (SMOOTH)
+# EMA SMOOTH
+# =========================
+def ema_smooth(series, span=5):
+    if len(series) < span:
+        return series.iloc[-1]
+    return series.ewm(span=span, adjust=False).mean().iloc[-1]
+
+
+# =========================
+# ACCUMULATION DAYS (SOFT)
 # =========================
 def accumulation_days(df):
 
@@ -20,16 +30,19 @@ def accumulation_days(df):
     vol = recent["volume"]
     vol_avg = df["volume"].rolling(20).mean().iloc[-1]
 
-    # sideway + vol cao
-    if price_range / avg_price < 0.06:  # 🔥 nới nhẹ
-        score = (vol > vol_avg * 1.1).sum() / 10  # 🔥 normalize [0-1]
+    if vol_avg == 0:
+        return 0
+
+    # sideway + volume support
+    if price_range / avg_price < 0.06:
+        score = (vol > vol_avg * 1.1).sum() / 10
         return score
 
-    return 0
+    return 0.1  # 🔥 tránh dead zero
 
 
 # =========================
-# ABSORPTION (KHÔNG TRẢ 0 CỨNG)
+# ABSORPTION SCORE (CONTINUOUS)
 # =========================
 def absorption_score(df):
 
@@ -47,18 +60,17 @@ def absorption_score(df):
         if vol_avg == 0:
             continue
 
-        # 🔥 nới điều kiện
         if vol > vol_avg * 1.2:
             if close >= prev:
                 score += 1
             else:
-                score += 0.3  # 🔥 không trả 0 → vẫn có hấp thụ nhẹ
+                score += 0.4  # 🔥 không drop về 0
 
-    return score / 5  # 🔥 normalize
+    return score / 5
 
 
 # =========================
-# EXPANSION QUALITY (SOFT)
+# EXPANSION QUALITY (SMOOTH)
 # =========================
 def expansion_quality(df):
 
@@ -69,26 +81,58 @@ def expansion_quality(df):
     close = df["close"].iloc[-1]
 
     vol = df["volume"]
-    vol_avg = vol.rolling(20).mean()
+    vol_avg = vol.rolling(20).mean().iloc[-1]
 
-    if vol_avg.iloc[-1] == 0:
+    if vol_avg == 0:
         return 0
 
-    # 🔥 nới điều kiện breakout
-    if close >= high * 0.97:
+    breakout_ratio = close / high
 
-        if vol.iloc[-1] > vol_avg.iloc[-1] * 1.4:
-            return 1.0
-        elif vol.iloc[-1] > vol_avg.iloc[-1] * 1.1:
-            return 0.6
-        else:
-            return 0.3  # 🔥 vẫn cho điểm nhẹ
+    # 🔥 continuous breakout strength
+    break_score = np.tanh((breakout_ratio - 0.97) * 10)
 
-    return 0.2  # 🔥 tránh trả 0 hoàn toàn
+    vol_ratio = vol.iloc[-1] / vol_avg
+    vol_score = np.tanh((vol_ratio - 1) * 2)
+
+    score = break_score * 1.5 + vol_score * 1.2
+
+    return np.clip(score, -1, 1)
 
 
 # =========================
-# MAIN SCORE (SCALED + SMOOTH)
+# BUILD SERIES (REAL SMOOTH)
+# =========================
+def build_flow_series(df):
+
+    series = []
+
+    for i in range(25, len(df)):
+        try:
+            sub = df.iloc[:i]
+
+            acc = accumulation_days(sub)
+            absb = absorption_score(sub)
+            exp = expansion_quality(sub)
+
+            val = (
+                acc * 1.0 +
+                absb * 1.2 +
+                exp * 1.5
+            )
+
+            series.append(val)
+
+        except:
+            continue
+
+    if len(series) < 5:
+        return None
+
+    return pd.Series(series)
+
+
+# =========================
+# MAIN SCORE (V5 FINAL)
 # =========================
 def institutional_flow_score(df):
 
@@ -96,36 +140,22 @@ def institutional_flow_score(df):
         if df is None or len(df) < 30:
             return 0
 
-        # =========================
-        # RAW COMPONENT
-        # =========================
-        acc = accumulation_days(df)
-        absb = absorption_score(df)
-        exp = expansion_quality(df)
+        series = build_flow_series(df)
 
-        raw_score = (
-            acc * 1.0 +
-            absb * 1.2 +
-            exp * 1.5
-        )
+        if series is None:
+            return 0
 
         # =========================
-        # 🔥 EMA SMOOTH (QUAN TRỌNG)
+        # 🔥 REAL EMA SMOOTH
         # =========================
-        # tạo series giả để smooth
-        temp = pd.Series([raw_score] * 5)
-        smooth = temp.ewm(span=3).mean().iloc[-1]
+        smooth = ema_smooth(series, span=5)
 
         # =========================
-        # 🔥 SCALE VỀ [-1 → +2]
+        # 🔥 NONLINEAR SCALE
         # =========================
-        # clamp trước
-        smooth = max(min(smooth, 3), -1)
+        score = np.tanh(smooth * 1.5) * 2   # 🔥 scale [-1 → +2]
 
-        # scale mềm
-        scaled = (smooth / 3) * 2  # ~ [-1 → +2]
-
-        return round(scaled, 2)
+        return round(score, 3)
 
     except Exception as e:
         print("FLOW SCORE ERROR:", str(e))
