@@ -68,7 +68,7 @@ HCM,HOSE,Chứng khoán
 HDB,HOSE,Ngân hàng
 HDC,HOSE,Bất động sản
 HDG,HOSE,Bất động sản
-HHS,HOSE,Công nghiệp
+HHS,HOSE,Bất động sản
 HHV,HOSE,Hạ tầng
 HPG,HOSE,Công nghiệp
 HQC,HOSE,Bất động sản
@@ -182,4 +182,3 @@ YEG,HOSE,Truyền thông
 PDR,HOSE,Bất động sản
 NVL,HOSE,Bất động sản
 DXS,HOSE,Bất động sản
-HHS,HOSE,Bất động sản
