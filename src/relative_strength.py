@@ -7,12 +7,12 @@ import pandas as pd
 # =========================
 def safe_pct_change(series, period):
     if len(series) < period + 1:
-        return pd.Series([0] * len(series))
+        return pd.Series([0.0] * len(series), index=series.index)
     return series.pct_change(period)
 
 
 # =========================
-# MAIN RS V4 (VECTOR + SMOOTH)
+# MAIN RS V4 (FIXED + STABLE)
 # =========================
 def relative_strength(df_stock, df_index):
 
@@ -24,7 +24,7 @@ def relative_strength(df_stock, df_index):
             return 0.0
 
         # =========================
-        # ALIGN DATA
+        # ALIGN DATA (ROBUST)
         # =========================
         s = df_stock[["date", "close"]].copy()
         i = df_index[["date", "close"]].copy()
@@ -38,8 +38,8 @@ def relative_strength(df_stock, df_index):
         if len(df) < 30:
             return 0.0
 
-        close_s = df["close_s"]
-        close_i = df["close_i"]
+        close_s = df["close_s"].astype(float)
+        close_i = df["close_i"].astype(float)
 
         # =========================
         # MULTI-HORIZON RS
@@ -57,25 +57,38 @@ def relative_strength(df_stock, df_index):
             rs_20 * 0.3
         )
 
+        # fill NaN sớm để tránh lan lỗi
+        rs_raw = rs_raw.fillna(0.0)
+
         # =========================
         # SMOOTH (EMA)
         # =========================
         rs_smooth = rs_raw.ewm(span=5, adjust=False).mean()
 
         # =========================
-        # VOLATILITY NORMALIZATION
+        # VOLATILITY NORMALIZATION (FIX)
         # =========================
         vol = close_s.pct_change().rolling(20).std()
 
-        # tránh chia 0
-        vol = vol.replace(0, np.nan).fillna(method="bfill").fillna(0.01)
+        # 🔥 FIX pandas 2.x + tránh NaN
+        vol = vol.replace(0, np.nan)
+        vol = vol.bfill().ffill()  # thay fillna(method=...)
+        vol = vol.fillna(0.01)     # fallback cuối
+
+        # tránh blow up
+        vol = np.clip(vol, 0.005, None)
 
         rs_vol_adj = rs_smooth / (vol * 5)
 
         # =========================
         # FINAL SCALE [-1 → +1]
         # =========================
-        rs_final = np.tanh(rs_vol_adj.iloc[-1])
+        val = rs_vol_adj.iloc[-1]
+
+        if pd.isna(val) or np.isinf(val):
+            return 0.0
+
+        rs_final = np.tanh(val)
 
         return float(rs_final)
 
