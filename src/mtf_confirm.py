@@ -1,38 +1,70 @@
+import numpy as np
+
+
 def mtf_confirm(df_d, df_h1):
 
     try:
         if df_h1 is None or len(df_h1) < 50:
-            return False
+            return 0  # 🔥 neutral thay vì False
 
-        # ===== H1 data =====
+        # =========================
+        # H1 DATA
+        # =========================
         close = df_h1["close"]
         high = df_h1["high"]
         vol = df_h1["volume"]
 
-        # ===== breakout H1 =====
-        h1_resistance = high.tail(20).max()
         price = close.iloc[-1]
 
-        # ===== volume =====
-        vol_ma = vol.rolling(20).mean()
+        # =========================
+        # LEVELS
+        # =========================
+        h1_resistance = high.tail(20).max()
 
         # =========================
-        # 🔥 LOGIC CONFIRM
+        # VOLUME
+        # =========================
+        vol_ma = vol.rolling(20).mean().iloc[-1]
+        vol_now = vol.iloc[-1]
+
+        # =========================
+        # TREND
+        # =========================
+        ma10 = close.tail(10).mean()
+
+        # =========================
+        # 🔥 COMPONENT SCORES
         # =========================
 
-        # 1. breakout H1 thật
-        cond_break = price >= h1_resistance * 0.98
+        # 1. BREAKOUT STRENGTH
+        break_score = (price / h1_resistance) - 1
+        break_score = np.tanh(break_score * 10)  # scale
 
-        # 2. volume xác nhận
-        cond_vol = vol.iloc[-1] > vol_ma.iloc[-1] * 1.2
+        # 2. VOLUME CONFIRM
+        if vol_ma > 0:
+            vol_ratio = vol_now / vol_ma
+            vol_score = np.tanh((vol_ratio - 1) * 2)
+        else:
+            vol_score = 0
 
-        # 3. giữ trend (không gãy)
-        cond_trend = close.iloc[-1] >= close.tail(10).mean()
+        # 3. TREND HOLD
+        trend_score = (price / ma10) - 1
+        trend_score = np.tanh(trend_score * 8)
 
-        if cond_break and cond_vol and cond_trend:
-            return True
+        # =========================
+        # 🔥 FINAL SCORE
+        # =========================
+        score = (
+            break_score * 1.5 +
+            vol_score * 1.2 +
+            trend_score * 1.0
+        )
 
-        return False
+        # 🔥 normalize về [-1 → +1]
+        score = np.tanh(score)
 
-    except:
-        return False
+        return score
+
+    except Exception as e:
+        print("MTF ERROR:", str(e))
+        return 0
