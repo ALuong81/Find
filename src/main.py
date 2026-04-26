@@ -14,17 +14,16 @@ from voe import voe_score
 from accumulation import detect_accumulation
 
 from institutional import institutional_score
-from institutional_flow import institutional_flow_score  # 🔥 NEW
+from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
-from market_mode import get_market_mode
 
 from mtf_confirm import mtf_confirm
-
 from tracker import log_trade
 
 import os
 import requests
+import numpy as np
 
 
 # =========================
@@ -51,26 +50,62 @@ def send_telegram(msg):
 
 
 # =========================
+# 🔥 V4 MARKET REGIME (ML STYLE)
+# =========================
+def market_regime(df_index):
+
+    try:
+        close = df_index["close"]
+
+        ret_5 = close.pct_change(5).iloc[-1]
+        ret_20 = close.pct_change(20).iloc[-1]
+
+        vol = close.pct_change().rolling(20).std().iloc[-1]
+
+        trend = close.rolling(20).mean().iloc[-1] - close.rolling(50).mean().iloc[-1]
+
+        score = (
+            ret_5 * 2 +
+            ret_20 * 1.5 -
+            vol * 2 +
+            (1 if trend > 0 else -1)
+        )
+
+        # 🔥 normalize
+        score = np.tanh(score * 3)
+
+        if score > 0.3:
+            return "AGGRESSIVE", score
+        elif score > -0.2:
+            return "NEUTRAL", score
+        else:
+            return "DEFENSIVE", score
+
+    except:
+        return "DEFENSIVE", -1
+
+
+# =========================
 # MAIN
 # =========================
 def main():
 
-    print("🚀 START BOT")
+    print("🚀 START BOT V4")
 
     df_symbols = load_symbols()
     print("TOTAL SYMBOLS:", len(df_symbols))
 
     # =========================
-    # MARKET
+    # 🔥 MARKET V4
     # =========================
-    m = market_score()
-    print("MARKET SCORE:", m)
+    df_index = load_index()
 
-    mode = get_market_mode(m)
-    print("⚙️ MODE:", mode)
+    mode, m_score = market_regime(df_index)
 
-    if mode == "OFF":
-        print("❌ MARKET OFF")
+    print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
+
+    if mode == "DEFENSIVE":
+        print("❌ MARKET DEFENSIVE → STOP")
         return
 
     # =========================
@@ -99,9 +134,8 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # FILTER + SCORING
+    # 🔥 FILTER + SCORING V4
     # =========================
-    df_index = load_index()
     scored = []
 
     for symbol in leaders:
@@ -111,48 +145,31 @@ def main():
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
             inst = institutional_score(df)
-            inst_flow = institutional_flow_score(df)  # 🔥 NEW
+            inst_flow = institutional_flow_score(df)
             mf = money_flow_score(df)
             acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # =========================
-            # 🔥 REGIME FILTER (NỚI)
-            # =========================
-            if mode == "SAFE":
-                rs_cond = rs > -0.02
+            # 🔥 adaptive RS filter
+            if mode == "AGGRESSIVE":
+                if rs < -0.12:
+                    continue
             else:
-                rs_cond = rs > -0.10   # 🔥 nới thêm
+                if rs < -0.05:
+                    continue
 
-            if not rs_cond:
-                continue
-
-            # =========================
-            # 🔥 SCORING (UPGRADE)
-            # =========================
             score = (
                 rs * 2 +
                 voe * 1.5 +
-                inst * 1.5 +
-                inst_flow * 1.5 +   # 🔥 ADD
-                mf * 1.2 +
+                inst * 1.2 +
+                inst_flow * 1.8 +
+                mf * 1.3 +
+                flow_acc * 1.2 +
                 (1 if acc else 0)
             )
 
-            # 🔥 FLOW TIMELINE
-            score += flow_acc * 1.2
-
-            # 🔥 MOMENTUM BOOST
-            if rs > 0:
-                score *= 1.1
-
-            # 🔥 MONEY FLOW BOOST
-            if mf > 1:
-                score *= 1.1
-
-            # 🔥 STRONG INSTITUTION BONUS
-            if inst_flow > 1:
-                score *= 1.1
+            # 🔥 nonlinear boost
+            score *= (1 + np.tanh(score))
 
             scored.append((symbol, score))
 
@@ -161,22 +178,16 @@ def main():
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # =========================
-    # LEADER SELECT
-    # =========================
     if not scored:
-        print("⚠️ NO STRONG LEADER → fallback")
-        leaders = leaders[:12]
+        print("⚠️ NO LEADER → fallback")
+        leaders = leaders[:10]
     else:
-        if mode == "SAFE":
-            leaders = [s[0] for s in scored[:10]]
-        else:
-            leaders = [s[0] for s in scored[:15]]
+        leaders = [s[0] for s in scored[:12]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
     # =========================
-    # ENTRY
+    # 🔥 ENTRY V4
     # =========================
     print("\nSCAN ENTRY...\n")
 
@@ -197,50 +208,43 @@ def main():
                 continue
 
             # =========================
-            # 🔥 MTF CONFIRM (KHÔNG GIẾT TÍN HIỆU)
+            # 🔥 SOFT MTF CONFIRM
             # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
+                mtf_ok = mtf_confirm(df, df_h1) if df_h1 is not None else True
             except:
-                df_h1 = None
+                mtf_ok = True
 
-            if f["type"] in ["EARLY", "PRE"]:
-                if df_h1 is not None:
-                    if not mtf_confirm(df, df_h1):
-                        print("   ❌ MTF FAIL")
-                        continue
-                else:
-                    print("   ⚠️ NO H1 → PASS")  # 🔥 FIX
-
-            # =========================
-            # 🔥 AGGRESSIVE FILTER (NỚI)
-            # =========================
-            if mode == "AGGRESSIVE":
-                if abs(price - f["entry"]) / f["entry"] > 0.10:  # 🔥 nới 0.08 → 0.10
-                    print("   ❌ too far")
-                    continue
+            # 🔥 KHÔNG kill signal
+            if not mtf_ok:
+                print("   ⚠️ MTF WEAK (not rejected)")
 
             rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
 
+            # =========================
+            # 🔥 SIGNAL SCORE V4
+            # =========================
             score = rr
 
-            # =========================
-            # 🔥 TYPE BOOST (RE-ORDER)
-            # =========================
-            if f["type"] == "EARLY_BREAKOUT":
-                score *= 1.8
-            elif f["type"] == "PRE":
-                score *= 1.6   # 🔥 tăng
-            elif f["type"] == "EARLY":
-                score *= 1.3
-            elif f["type"] == "STRONG":
-                score *= 1.0
-            elif f["type"] == "PULLBACK":
-                score *= 1.1
+            type_weight = {
+                "EARLY_BREAKOUT": 1.8,
+                "PRE": 1.6,
+                "EARLY": 1.3,
+                "STRONG": 1.0,
+                "PULLBACK": 1.1
+            }
 
-            # 🔥 REGIME BOOST
+            score *= type_weight.get(f["type"], 1.0)
+
+            # 🔥 combine with system strength
+            system_score = next((x[1] for x in scored if x[0] == symbol), 0)
+
+            final_score = score * (1 + system_score * 0.1)
+
+            # 🔥 regime boost
             if mode == "AGGRESSIVE":
-                score *= 1.2
+                final_score *= 1.2
 
             signals.append({
                 "symbol": symbol,
@@ -250,7 +254,7 @@ def main():
                 "tp2": f["tp2"],
                 "rr": rr,
                 "type": f["type"],
-                "score": score
+                "score": final_score
             })
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
@@ -269,7 +273,7 @@ def main():
     # =========================
     if signals:
 
-        msg = "🔥 SMART MONEY SIGNALS\n\n"
+        msg = "🔥 V4 SMART MONEY SIGNALS\n\n"
 
         for s in signals:
             msg += (
@@ -277,7 +281,6 @@ def main():
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
-                f"TP2: {round(s['tp2'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n\n"
             )
 
