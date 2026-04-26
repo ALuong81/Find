@@ -49,7 +49,7 @@ def send_telegram(msg):
 
 
 # =========================
-# 🔥 MARKET REGIME
+# MARKET REGIME
 # =========================
 def market_regime(df_index):
 
@@ -86,7 +86,7 @@ def market_regime(df_index):
 
 
 # =========================
-# 🔥 REGIME CONFIG
+# REGIME CONFIG
 # =========================
 def regime_config(mode):
 
@@ -125,9 +125,6 @@ def main():
 
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
-    if mode == "DEFENSIVE":
-        print("⚠️ DEFENSIVE MODE → giảm risk, không tắt bot")
-
     # =========================
     # SECTOR
     # =========================
@@ -141,7 +138,7 @@ def main():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
     # =========================
-    # LEADERS RAW
+    # RAW LEADERS
     # =========================
     leaders = []
 
@@ -154,13 +151,16 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 🔥 FULL SCORING (NO FILTER)
+    # FULL SCORING (NO FILTER)
     # =========================
     scored = []
 
     for symbol in leaders:
         try:
             df = load_stock_data(symbol)
+
+            if df is None or len(df) < 50:
+                continue
 
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
@@ -186,17 +186,20 @@ def main():
             scored.append((symbol, score))
 
         except Exception as e:
-            print(symbol, "FILTER ERROR:", str(e))
+            print(symbol, "SCORING ERROR:", str(e))
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # 🔥 luôn giữ top N (không fallback cứng)
+    if not scored:
+        print("⚠️ NO DATA")
+        return
+
     leaders = [s[0] for s in scored[:12]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
     # =========================
-    # ENTRY
+    # ENTRY (NO HARD FILTER)
     # =========================
     print("\nSCAN ENTRY...\n")
 
@@ -206,19 +209,19 @@ def main():
 
         try:
             df = load_stock_data(symbol)
+
+            if df is None or len(df) < 50:
+                continue
+
             price = df["close"].iloc[-1]
 
-            # 🔥 truyền regime vào entry
             ok, f = validate_entry(df, symbol, regime=mode)
 
-            print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
-
-            if not ok:
-                print("   ❌ skip")
+            if not ok or f is None:
                 continue
 
             # =========================
-            # 🔥 MTF SCORE (KHÔNG BOOLEAN)
+            # MTF SCORE
             # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
@@ -229,7 +232,16 @@ def main():
             # =========================
             # RR
             # =========================
-            rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
+            risk = f["entry"] - f["sl"]
+            reward = f["tp1"] - f["entry"]
+
+            if risk <= 0:
+                continue
+
+            rr = reward / risk
+
+            # clamp RR tránh outlier phá hệ
+            rr = min(rr, 5)
 
             # =========================
             # TYPE WEIGHT
@@ -250,14 +262,14 @@ def main():
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
             # =========================
-            # 🔥 FINAL SCORE (FULL STACK)
+            # FINAL SCORE (FULL STACK)
             # =========================
             final_score = base_score
 
             # system strength
             final_score *= (1 + system_score * 0.1)
 
-            # MTF boost (key fix)
+            # MTF boost
             final_score *= (1 + mtf_score * 0.3)
 
             # regime boost
@@ -278,11 +290,14 @@ def main():
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            print("   ✅ SIGNAL")
+            print(f"{symbol} ✅ score={round(final_score,2)}")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
 
+    # =========================
+    # SORT FINAL
+    # =========================
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     print("\nTOTAL SIGNAL:", len(signals))
@@ -294,7 +309,7 @@ def main():
 
         msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
 
-        for s in signals:
+        for s in signals[:10]:  # 🔥 chỉ gửi top 10
             msg += (
                 f"{s['symbol']} ({s['type']})\n"
                 f"Entry: {round(s['entry'],2)}\n"
