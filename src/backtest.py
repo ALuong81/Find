@@ -14,6 +14,7 @@ from institutional import institutional_score
 from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
+from adaptive_winrate import record_trade
 
 
 INITIAL_CAPITAL = 100000
@@ -306,5 +307,5 @@ def run_backtest(start_date="2023-01-01"):
             })
 
             trades_today += 1  # 🔥 increment
-
+            #record_trade(signal, result)
     return pd.DataFrame(history)
