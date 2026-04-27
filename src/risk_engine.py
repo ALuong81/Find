@@ -71,11 +71,11 @@ def drawdown_adjustment(equity, peak):
     if dd < 0.05:
         return 1.0
     elif dd < 0.1:
-        return 0.8
+        return 0.7
     elif dd < 0.15:
-        return 0.6
+        return 0.5
     else:
-        return 0.4
+        return 0.3
 
 
 # =========================
