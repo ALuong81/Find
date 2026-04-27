@@ -5,27 +5,26 @@ from adaptive_winrate import estimate_winrate
 # =========================
 # CONFIG
 # =========================
-KELLY_FRACTION = 0.5     # 🔥 half Kelly
-MAX_RISK_PER_TRADE = 0.03
-TARGET_VOL = 0.12        # annualized target
+MAX_RISK_PER_TRADE = 0.02   # 2%
+KELLY_FRACTION = 0.5        # dùng 50% Kelly
+MIN_RISK = 0.002           # floor 0.2%
+MAX_POSITION = 0.3         # max 30% vốn
+
+TARGET_VOL = 0.12          # annualized target vol
 VOL_LOOKBACK = 20
 
 
 # =========================
-# KELLY FRACTION
+# KELLY CALC
 # =========================
-def kelly_fraction(rr, winrate):
+def kelly_fraction(winrate, rr):
 
-    b = rr
-    p = winrate
-    q = 1 - p
-
-    if b <= 0:
+    if rr <= 0:
         return 0
 
-    k = (b * p - q) / b
+    k = winrate - (1 - winrate) / rr
 
-    return max(k, 0) * KELLY_FRACTION
+    return max(k, 0)
 
 
 # =========================
@@ -33,17 +32,21 @@ def kelly_fraction(rr, winrate):
 # =========================
 def compute_volatility(df):
 
-    returns = df["close"].pct_change().dropna()
+    try:
+        returns = df["close"].pct_change().dropna()
 
-    if len(returns) < VOL_LOOKBACK:
+        if len(returns) < VOL_LOOKBACK:
+            return 0.02
+
+        vol = returns.rolling(VOL_LOOKBACK).std().iloc[-1]
+
+        # annualize
+        vol = vol * np.sqrt(252)
+
+        return max(vol, 0.01)
+
+    except:
         return 0.02
-
-    vol = returns.rolling(VOL_LOOKBACK).std().iloc[-1]
-
-    # annualize (rough)
-    vol = vol * np.sqrt(252)
-
-    return max(vol, 0.01)
 
 
 # =========================
@@ -51,31 +54,19 @@ def compute_volatility(df):
 # =========================
 def volatility_adjustment(vol):
 
-    if vol == 0:
+    if vol <= 0:
         return 1
 
     adj = TARGET_VOL / vol
 
+    # tránh scale quá mạnh
     return np.clip(adj, 0.5, 1.5)
 
 
 # =========================
-# REGIME SCALE
+# MAIN POSITION SIZE
 # =========================
-def regime_scale(mode):
-
-    if mode == "AGGRESSIVE":
-        return 1.2
-    elif mode == "NEUTRAL":
-        return 1.0
-    else:
-        return 0.6
-
-
-# =========================
-# FINAL POSITION SIZE
-# =========================
-def position_size(equity, signal, mode, df):
+def position_size(equity, signal, regime, df):
 
     entry = signal["entry"]
     sl = signal["sl"]
@@ -87,35 +78,51 @@ def position_size(equity, signal, mode, df):
         return 0
 
     # =========================
-    # EDGE
+    # 🔥 ADAPTIVE WINRATE
     # =========================
     winrate = estimate_winrate(signal)
-    kelly = kelly_fraction(rr, winrate)
 
     # =========================
-    # VOL
+    # 🔥 KELLY
+    # =========================
+    kelly = kelly_fraction(winrate, rr)
+    kelly_adj = kelly * KELLY_FRACTION
+
+    # =========================
+    # 🔥 REGIME SCALE
+    # =========================
+    regime_map = {
+        "AGGRESSIVE": 1.0,
+        "NEUTRAL": 0.7,
+        "DEFENSIVE": 0.4
+    }
+
+    regime_scale = regime_map.get(regime, 0.7)
+
+    # =========================
+    # 🔥 VOL ADJUST
     # =========================
     vol = compute_volatility(df)
     vol_adj = volatility_adjustment(vol)
 
     # =========================
-    # REGIME
+    # 🔥 FINAL RISK %
     # =========================
-    reg = regime_scale(mode)
+    risk_pct = kelly_adj * regime_scale * vol_adj
+
+    # clamp: cực kỳ quan trọng
+    risk_pct = max(MIN_RISK, min(risk_pct, MAX_RISK_PER_TRADE))
 
     # =========================
-    # FINAL RISK %
-    # =========================
-    risk_pct = kelly * vol_adj * reg
-
-    # cap lại cho an toàn
-    risk_pct = min(risk_pct, MAX_RISK_PER_TRADE)
-
-    # =========================
-    # SIZE
+    # 🔥 SIZE
     # =========================
     risk_amount = equity * risk_pct
-
     size = risk_amount / risk_per_share
+
+    # =========================
+    # 🔥 POSITION CAP
+    # =========================
+    max_size = (equity * MAX_POSITION) / entry
+    size = min(size, max_size)
 
     return max(size, 0)
