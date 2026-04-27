@@ -121,7 +121,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST
+# BACKTEST (FIXED)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -135,6 +135,8 @@ def run_backtest(start_date="2023-01-01"):
     df_index_full = df_index_full.sort_values("date")
 
     equity = INITIAL_CAPITAL
+    peak_equity = equity  # 🔥 NEW
+
     history = []
 
     unique_dates = sorted(df_index_full["date"].unique())
@@ -146,6 +148,9 @@ def run_backtest(start_date="2023-01-01"):
 
         if date < start_date:
             continue
+
+        # 🔥 UPDATE PEAK TRƯỚC MỌI THỨ
+        peak_equity = max(peak_equity, equity)
 
         df_index = df_index_full[df_index_full["date"] <= date]
 
@@ -267,22 +272,36 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
+            # 🔥 DRAWDOWN SCALE (NEW)
+            # =========================
+            dd = (peak_equity - equity) / peak_equity
+
+            if dd < 0.05:
+                dd_scale = 1.0
+            elif dd < 0.1:
+                dd_scale = 0.7
+            elif dd < 0.15:
+                dd_scale = 0.5
+            else:
+                dd_scale = 0.3
+
+            risk_amount = equity * risk_pct * dd_scale
+
+            # =========================
             # POSITION UPDATE
             # =========================
-            risk_amount = equity * risk_pct
-
             if result == 1:
                 equity += risk_amount * rr
             elif result == -1:
                 equity -= risk_amount
 
             # =========================
-            # 🔥 BUILD SIGNAL + RECORD
+            # RECORD
             # =========================
             signal = {
                 "type": f.get("type", "UNKNOWN"),
                 "rr": rr,
-                "mtf_score": 0,  # backtest chưa có MTF → để 0
+                "mtf_score": 0,
                 "regime": mode
             }
 
