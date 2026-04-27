@@ -1,3 +1,4 @@
+from portfolio_engine import optimize_portfolio
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index, load_stock_data_h1
 
@@ -311,7 +312,9 @@ def main():
         except Exception as e:
             print(symbol, "ERROR:", str(e))
 
+    #signals = sorted(signals, key=lambda x: x["score"], reverse=True)
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+    signals = optimize_portfolio(signals, data_map, equity)
 
     print("\nTOTAL SIGNAL:", len(signals))
 
