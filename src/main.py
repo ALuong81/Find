@@ -99,6 +99,14 @@ def main():
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
     # =========================
+    # BUILD SYMBOL → SECTOR MAP (🔥 FIX)
+    # =========================
+    symbol_to_sector = {
+        row["symbol"]: row["sector"]
+        for _, row in df_symbols.iterrows()
+    }
+
+    # =========================
     # SECTOR
     # =========================
     sector_df = sector_money_flow(df_symbols)
@@ -147,14 +155,13 @@ def main():
             mf = money_flow_score(df)
             flow_acc = flow_timeline(df)
 
-            sector_row = next(
-                (r for _, r in top_sectors.iterrows()
-                 if symbol in pick_leaders(df_symbols, r["sector"])["symbol"].values),
-                None
-            )
+            sector = symbol_to_sector.get(symbol)
+            sector_row = sector_df[sector_df["sector"] == sector]
 
-            if sector_row is None:
+            if sector_row.empty:
                 continue
+
+            sector_row = sector_row.iloc[0]
 
             leader_score = compute_leader_score(
                 rs=rs,
@@ -185,12 +192,14 @@ def main():
     print("\n🔥 STRONG LEADERS:", leaders)
 
     # =========================
-    # PRELOAD DATA
+    # PRELOAD DATA (🔥 FIX CLEAN)
     # =========================
-    data_map = {
-        s: load_stock_data(s)
-        for s in leaders
-    }
+    data_map = {}
+
+    for s in leaders:
+        df = load_stock_data(s)
+        if df is not None and len(df) >= 30:
+            data_map[s] = df
 
     # =========================
     # ENTRY
@@ -199,14 +208,14 @@ def main():
 
     signals = []
     equity = 100000
-    peak_equity = equity   # 🔥 FIX
+    peak_equity = equity
 
     for symbol in leaders:
 
         try:
             df = data_map.get(symbol)
 
-            if df is None or len(df) < 30:
+            if df is None:
                 continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
@@ -229,13 +238,15 @@ def main():
 
             rr = min(reward / risk, 5)
 
-            base_score = rr
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            final_score = base_score * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
+            final_score = rr * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
+
+            sector = symbol_to_sector.get(symbol, "UNKNOWN")
 
             signal = {
                 "symbol": symbol,
+                "sector": sector,   # 🔥 FIX
                 "entry": f["entry"],
                 "sl": f["sl"],
                 "tp1": f["tp1"],
@@ -246,12 +257,11 @@ def main():
                 "mtf_score": round(mtf_score, 2)
             }
 
-            # 🔥 FIX: pass peak_equity
+            # 🔥 FIX: đúng signature
             size = position_size(
                 equity=equity,
                 signal=signal,
                 regime=mode,
-                df=df,
                 peak_equity=peak_equity
             )
 
@@ -278,11 +288,6 @@ def main():
     signals = optimize_portfolio(signals, data_map, equity)
 
     print("\nTOTAL SIGNAL:", len(signals))
-
-    # =========================
-    # UPDATE PEAK (REAL SYSTEM SHOULD DO THIS AFTER TRADE)
-    # =========================
-    peak_equity = max(peak_equity, equity)
 
     if signals:
 
