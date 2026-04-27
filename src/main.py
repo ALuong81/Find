@@ -232,8 +232,8 @@ def main():
     for symbol in leaders:
         try:
             data_map[symbol] = load_stock_data(symbol)
-            except:
-                pass
+        except:
+            pass
             
     # =========================
     # ENTRY
