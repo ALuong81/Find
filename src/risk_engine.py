@@ -2,119 +2,137 @@ import numpy as np
 
 
 # =========================
-# 🔥 EDGE CALCULATION
+# CONFIG
 # =========================
-def calc_edge(signal):
-
-    score = signal.get("score", 0)
-    confidence = signal.get("confidence", 0.5)
-    mtf = signal.get("mtf_score", 0)
-
-    # normalize score
-    score_norm = np.tanh(score / 5)
-
-    edge = (
-        score_norm * 0.5 +
-        confidence * 0.3 +
-        mtf * 0.2
-    )
-
-    return np.clip(edge, 0.2, 1.0)
+KELLY_FRACTION = 0.5     # 🔥 half Kelly
+MAX_RISK_PER_TRADE = 0.03
+TARGET_VOL = 0.12        # annualized target
+VOL_LOOKBACK = 20
 
 
 # =========================
-# 🔥 TYPE WEIGHT
+# ESTIMATE WINRATE
 # =========================
-def type_weight(signal):
+def estimate_winrate(signal):
 
-    t = signal.get("type", "")
+    base = 0.45  # baseline hệ bạn
 
-    weights = {
-        "EARLY_BREAKOUT": 1.2,
-        "PRE": 1.1,
-        "EARLY": 1.0,
-        "STRONG": 0.9,
-        "PULLBACK": 0.7
+    type_boost = {
+        "EARLY_BREAKOUT": 0.1,
+        "PRE": 0.08,
+        "EARLY": 0.05,
+        "STRONG": 0.02,
+        "PULLBACK": 0.0
     }
 
-    return weights.get(t, 0.8)
+    return min(base + type_boost.get(signal["type"], 0), 0.7)
 
 
 # =========================
-# 🔥 RR ADJUST
+# KELLY FRACTION
 # =========================
-def rr_weight(signal):
+def kelly_fraction(rr, winrate):
 
-    rr = signal.get("rr", 1)
+    b = rr
+    p = winrate
+    q = 1 - p
 
-    if rr >= 2:
+    if b <= 0:
+        return 0
+
+    k = (b * p - q) / b
+
+    return max(k, 0) * KELLY_FRACTION
+
+
+# =========================
+# VOLATILITY
+# =========================
+def compute_volatility(df):
+
+    returns = df["close"].pct_change().dropna()
+
+    if len(returns) < VOL_LOOKBACK:
+        return 0.02
+
+    vol = returns.rolling(VOL_LOOKBACK).std().iloc[-1]
+
+    # annualize (rough)
+    vol = vol * np.sqrt(252)
+
+    return max(vol, 0.01)
+
+
+# =========================
+# VOL ADJUST
+# =========================
+def volatility_adjustment(vol):
+
+    if vol == 0:
+        return 1
+
+    adj = TARGET_VOL / vol
+
+    return np.clip(adj, 0.5, 1.5)
+
+
+# =========================
+# REGIME SCALE
+# =========================
+def regime_scale(mode):
+
+    if mode == "AGGRESSIVE":
         return 1.2
-    elif rr >= 1:
+    elif mode == "NEUTRAL":
         return 1.0
     else:
         return 0.6
 
 
 # =========================
-# 🔥 REGIME ADJUST
+# FINAL POSITION SIZE
 # =========================
-def regime_adjust(regime):
-
-    if regime == "AGGRESSIVE":
-        return 1.2
-    elif regime == "NEUTRAL":
-        return 1.0
-    else:  # DEFENSIVE
-        return 0.6
-
-
-# =========================
-# 🔥 FINAL POSITION SIZE (CORE)
-# =========================
-def position_size(equity, signal, regime, base_risk=0.02):
+def position_size(equity, signal, mode, df):
 
     entry = signal["entry"]
     sl = signal["sl"]
+    rr = signal["rr"]
 
-    if entry == sl:
+    risk_per_share = abs(entry - sl)
+
+    if risk_per_share <= 0:
         return 0
 
     # =========================
-    # 🔥 CALC RISK %
+    # EDGE
     # =========================
-    edge = calc_edge(signal)
-    t_weight = type_weight(signal)
-    rr_adj = rr_weight(signal)
-    regime_adj = regime_adjust(regime)
-
-    risk_pct = base_risk * edge * t_weight * rr_adj * regime_adj
-
-    # clamp tránh quá lớn / quá nhỏ
-    risk_pct = np.clip(risk_pct, 0.005, base_risk)
+    winrate = estimate_winrate(signal)
+    kelly = kelly_fraction(rr, winrate)
 
     # =========================
-    # 🔥 POSITION SIZE
+    # VOL
+    # =========================
+    vol = compute_volatility(df)
+    vol_adj = volatility_adjustment(vol)
+
+    # =========================
+    # REGIME
+    # =========================
+    reg = regime_scale(mode)
+
+    # =========================
+    # FINAL RISK %
+    # =========================
+    risk_pct = kelly * vol_adj * reg
+
+    # cap lại cho an toàn
+    risk_pct = min(risk_pct, MAX_RISK_PER_TRADE)
+
+    # =========================
+    # SIZE
     # =========================
     risk_amount = equity * risk_pct
-    size = risk_amount / abs(entry - sl)
 
-    return round(size, 2)
+    size = risk_amount / risk_per_share
 
-
-# =========================
-# 🔥 OPTIONAL: MAX TOTAL RISK CONTROL
-# =========================
-def cap_total_risk(positions, max_total_risk=0.06):
-
-    total = sum(p["risk_pct"] for p in positions)
-
-    if total <= max_total_risk:
-        return positions
-
-    scale = max_total_risk / total
-
-    for p in positions:
-        p["risk_pct"] *= scale
-        p["size"] *= scale
-
-    return positions
+    return max(size, 0)
