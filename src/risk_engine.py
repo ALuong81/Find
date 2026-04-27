@@ -1,4 +1,5 @@
 import numpy as np
+from adaptive_winrate import estimate_winrate
 
 
 # =========================
@@ -8,24 +9,6 @@ KELLY_FRACTION = 0.5     # 🔥 half Kelly
 MAX_RISK_PER_TRADE = 0.03
 TARGET_VOL = 0.12        # annualized target
 VOL_LOOKBACK = 20
-
-
-# =========================
-# ESTIMATE WINRATE
-# =========================
-def estimate_winrate(signal):
-
-    base = 0.45  # baseline hệ bạn
-
-    type_boost = {
-        "EARLY_BREAKOUT": 0.1,
-        "PRE": 0.08,
-        "EARLY": 0.05,
-        "STRONG": 0.02,
-        "PULLBACK": 0.0
-    }
-
-    return min(base + type_boost.get(signal["type"], 0), 0.7)
 
 
 # =========================
