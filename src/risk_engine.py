@@ -71,82 +71,108 @@ def drawdown_adjustment(equity, peak):
     if dd < 0.05:
         return 1.0
     elif dd < 0.1:
-        return 0.7
+        return 0.75
     elif dd < 0.15:
-        return 0.5
+        return 0.55
     else:
-        return 0.3
+        return 0.35
 
 
 # =========================
 # MAIN POSITION SIZE
 # =========================
-def position_size(equity, signal, regime, df, peak_equity):
+def position_size(equity, signal, regime, peak_equity):
 
     entry = signal["entry"]
+
     sl = signal["sl"]
+
     rr = signal["rr"]
 
     risk_per_share = abs(entry - sl)
 
     if risk_per_share <= 0:
+
         return 0
 
     # =========================
-    # 🔥 ADAPTIVE WINRATE
+
+    # WINRATE
+
     # =========================
+
     winrate = estimate_winrate(signal)
 
     # =========================
-    # 🔥 KELLY
+
+    # KELLY
+
     # =========================
+
     kelly = kelly_fraction(winrate, rr)
+
     kelly_adj = kelly * KELLY_FRACTION
 
     # anti overconfidence
+
     if winrate > 0.6:
+
         kelly_adj *= 0.8
 
     # =========================
-    # 🔥 REGIME
+
+    # REGIME
+
     # =========================
+
     regime_map = {
+
         "AGGRESSIVE": 1.0,
+
         "NEUTRAL": 0.7,
+
         "DEFENSIVE": 0.4
+
     }
 
     regime_scale = regime_map.get(regime, 0.7)
 
     # =========================
-    # 🔥 VOL
-    # =========================
-    vol = compute_volatility(df)
-    vol_adj = volatility_adjustment(vol)
+
+    # DRAWDOWN
 
     # =========================
-    # 🔥 DRAWDOWN
-    # =========================
+
     dd_scale = drawdown_adjustment(equity, peak_equity)
 
     # =========================
-    # 🔥 FINAL RISK %
-    # =========================
-    risk_pct = kelly_adj * regime_scale * vol_adj * dd_scale
 
-    # clamp
+    # FINAL RISK %
+
+    # =========================
+
+    risk_pct = kelly_adj * regime_scale * dd_scale
+
     risk_pct = max(MIN_RISK, min(risk_pct, MAX_RISK_PER_TRADE))
 
     # =========================
-    # 🔥 SIZE
+
+    # SIZE
+
     # =========================
+
     risk_amount = equity * risk_pct
+
     size = risk_amount / risk_per_share
 
     # =========================
-    # 🔥 POSITION CAP
+
+    # POSITION CAP
+
     # =========================
+
     max_size = (equity * MAX_POSITION) / entry
+
     size = min(size, max_size)
 
     return max(size, 0)
