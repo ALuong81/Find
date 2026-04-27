@@ -301,7 +301,14 @@ def main():
                 "mtf_score": round(mtf_score, 2)
             }
 
-            size = position_size(equity, signal, mode)
+            #size = position_size(equity, signal, mode)
+            df_full = load_stock_data(symbol)
+            size = position_size(
+                equity=equity,
+                signal=signal,
+                mode=mode,
+                df=df_full
+            )
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
 
