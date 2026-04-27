@@ -20,8 +20,9 @@ from flow_timeline import flow_timeline
 from mtf_confirm import mtf_confirm
 from tracker import log_trade
 
-# 🔥 NEW: risk engine
+# 🔥 NEW
 from risk_engine import position_size
+from leader_score import compute_leader_score
 
 import os
 import requests
@@ -141,54 +142,50 @@ def main():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
     # =========================
-    # RAW LEADERS
-    # =========================
-    leaders = []
-
-    for _, row in top_sectors.iterrows():
-        stocks = pick_leaders(df_symbols, row["sector"])
-        for _, s in stocks.iterrows():
-            leaders.append(s["symbol"])
-
-    leaders = list(set(leaders))
-    print("\n🔥 RAW LEADERS:", leaders)
-
-    # =========================
-    # FULL SCORING (NO FILTER)
+    # 🔥 FULL SCORING (NEW)
     # =========================
     scored = []
 
-    for symbol in leaders:
-        try:
-            df = load_stock_data(symbol)
+    for _, row in top_sectors.iterrows():
 
-            if df is None or len(df) < 50:
-                continue
+        stocks = pick_leaders(df_symbols, row["sector"])
 
-            rs = relative_strength(df, df_index)
-            voe = voe_score(df, df_index)
-            inst = institutional_score(df)
-            inst_flow = institutional_flow_score(df)
-            mf = money_flow_score(df)
-            acc = detect_accumulation(df)
-            flow_acc = flow_timeline(df)
+        for _, s in stocks.iterrows():
 
-            score = (
-                rs * 2 +
-                voe * 1.5 +
-                inst * 1.2 +
-                inst_flow * 1.8 +
-                mf * 1.3 +
-                flow_acc * 1.2 +
-                (1 if acc else 0)
-            )
+            symbol = s["symbol"]
 
-            score *= (1 + np.tanh(score))
+            try:
+                df = load_stock_data(symbol)
 
-            scored.append((symbol, score))
+                if df is None or len(df) < 50:
+                    continue
 
-        except Exception as e:
-            print(symbol, "SCORING ERROR:", str(e))
+                # =========================
+                # FEATURES
+                # =========================
+                rs = relative_strength(df, df_index)
+                voe = voe_score(df, df_index)
+                inst = institutional_score(df)
+                inst_flow = institutional_flow_score(df)
+                mf = money_flow_score(df)
+                flow_acc = flow_timeline(df)
+
+                # 🔥 NEW LEADER SCORE
+                leader_score = compute_leader_score(
+                    rs=rs,
+                    rotation_score=row["rotation_score"],
+                    rs_sector=rs - row.get("sector_return", 0),
+                    inst=inst,
+                    inst_flow=inst_flow,
+                    mf=mf,
+                    flow_timeline=flow_acc,
+                    voe=voe
+                )
+
+                scored.append((symbol, leader_score))
+
+            except Exception as e:
+                print(symbol, "SCORING ERROR:", str(e))
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -207,7 +204,7 @@ def main():
 
     signals = []
 
-    equity = 100000  # 🔥 capital (sau này thay bằng account thật)
+    equity = 100000
 
     for symbol in leaders:
 
@@ -240,8 +237,7 @@ def main():
             if risk <= 0:
                 continue
 
-            rr = reward / risk
-            rr = min(rr, 5)
+            rr = min(reward / risk, 5)
 
             # =========================
             # TYPE WEIGHT
@@ -258,17 +254,11 @@ def main():
 
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            # =========================
-            # FINAL SCORE
-            # =========================
             final_score = base_score
             final_score *= (1 + system_score * 0.1)
             final_score *= (1 + mtf_score * 0.3)
             final_score *= cfg["score_boost"]
 
-            # =========================
-            # 🔥 ADD RISK ENGINE (ONLY ADD)
-            # =========================
             signal = {
                 "symbol": symbol,
                 "entry": f["entry"],
@@ -282,7 +272,9 @@ def main():
                 "mtf_score": round(mtf_score, 2)
             }
 
-            # 👉 NEW
+            # =========================
+            # 🔥 RISK ENGINE
+            # =========================
             size = position_size(equity, signal, mode)
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
@@ -301,9 +293,6 @@ def main():
         except Exception as e:
             print(symbol, "ERROR:", str(e))
 
-    # =========================
-    # SORT FINAL
-    # =========================
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
 
     print("\nTOTAL SIGNAL:", len(signals))
