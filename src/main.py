@@ -21,8 +21,8 @@ from mtf_confirm import mtf_confirm
 from tracker import log_trade
 
 # 🔥 NEW
-from risk_engine import position_size
 from leader_score import compute_leader_score
+from risk_engine import position_size
 
 import os
 import requests
@@ -142,15 +142,28 @@ def main():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
     # =========================
-    # 🔥 FULL SCORING (NEW)
+    # RAW LEADERS
+    # =========================
+    leaders = []
+
+    for _, row in top_sectors.iterrows():
+        stocks = pick_leaders(df_symbols, row["sector"])
+        for _, s in stocks.iterrows():
+            leaders.append(s["symbol"])
+
+    leaders = list(set(leaders))
+    print("\n🔥 RAW LEADERS:", leaders)
+
+    # =========================
+    # 🔥 FULL SCORING (WITH LIQUIDITY FILTER)
     # =========================
     scored = []
 
     for _, row in top_sectors.iterrows():
 
-        stocks = pick_leaders(df_symbols, row["sector"])
+        sector_stocks = pick_leaders(df_symbols, row["sector"])
 
-        for _, s in stocks.iterrows():
+        for _, s in sector_stocks.iterrows():
 
             symbol = s["symbol"]
 
@@ -158,6 +171,15 @@ def main():
                 df = load_stock_data(symbol)
 
                 if df is None or len(df) < 50:
+                    continue
+
+                # =========================
+                # 🔥 LIQUIDITY FILTER
+                # =========================
+                df["value"] = df["close"] * df["volume"]
+                avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
+
+                if avg_value_20 < 8e8:
                     continue
 
                 # =========================
@@ -170,7 +192,9 @@ def main():
                 mf = money_flow_score(df)
                 flow_acc = flow_timeline(df)
 
-                # 🔥 NEW LEADER SCORE
+                # =========================
+                # 🔥 LEADER SCORE (NEW CORE)
+                # =========================
                 leader_score = compute_leader_score(
                     rs=rs,
                     rotation_score=row["rotation_score"],
@@ -203,7 +227,6 @@ def main():
     print("\nSCAN ENTRY...\n")
 
     signals = []
-
     equity = 100000
 
     for symbol in leaders:
@@ -239,9 +262,6 @@ def main():
 
             rr = min(reward / risk, 5)
 
-            # =========================
-            # TYPE WEIGHT
-            # =========================
             type_weight = {
                 "EARLY_BREAKOUT": 1.8,
                 "PRE": 1.6,
