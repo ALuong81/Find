@@ -121,7 +121,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (FIXED)
+# BACKTEST (FINAL CLEAN)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -135,7 +135,7 @@ def run_backtest(start_date="2023-01-01"):
     df_index_full = df_index_full.sort_values("date")
 
     equity = INITIAL_CAPITAL
-    peak_equity = equity  # 🔥 NEW
+    peak_equity = equity
 
     history = []
 
@@ -149,7 +149,9 @@ def run_backtest(start_date="2023-01-01"):
         if date < start_date:
             continue
 
-        # 🔥 UPDATE PEAK TRƯỚC MỌI THỨ
+        # =========================
+        # UPDATE PEAK
+        # =========================
         peak_equity = max(peak_equity, equity)
 
         df_index = df_index_full[df_index_full["date"] <= date]
@@ -169,6 +171,9 @@ def run_backtest(start_date="2023-01-01"):
             risk_pct = 0.015
             score_threshold = -0.2
 
+        # =========================
+        # SECTOR
+        # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
             sector_df = sector_rotation(sector_df)
@@ -246,12 +251,15 @@ def run_backtest(start_date="2023-01-01"):
             if trades_today >= MAX_TRADES_PER_DAY:
                 break
 
+            if symbol not in data_map:
+                continue
+
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
             ok, f = validate_entry(df, symbol, regime=mode)
 
-            if not ok:
+            if not ok or f is None:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
@@ -272,23 +280,26 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # 🔥 DRAWDOWN SCALE (NEW)
+            # DRAWDOWN CONTROL
             # =========================
-            dd = (peak_equity - equity) / peak_equity
-
-            if dd < 0.05:
-                dd_scale = 1.0
-            elif dd < 0.1:
-                dd_scale = 0.7
-            elif dd < 0.15:
-                dd_scale = 0.5
+            if peak_equity <= 0:
+                dd_scale = 1
             else:
-                dd_scale = 0.3
+                dd = (peak_equity - equity) / peak_equity
+
+                if dd < 0.05:
+                    dd_scale = 1.0
+                elif dd < 0.1:
+                    dd_scale = 0.7
+                elif dd < 0.15:
+                    dd_scale = 0.5
+                else:
+                    dd_scale = 0.3
 
             risk_amount = equity * risk_pct * dd_scale
 
             # =========================
-            # POSITION UPDATE
+            # APPLY RESULT
             # =========================
             if result == 1:
                 equity += risk_amount * rr
@@ -296,7 +307,7 @@ def run_backtest(start_date="2023-01-01"):
                 equity -= risk_amount
 
             # =========================
-            # RECORD
+            # RECORD TRADE (QUAN TRỌNG)
             # =========================
             signal = {
                 "type": f.get("type", "UNKNOWN"),
