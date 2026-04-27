@@ -2,11 +2,7 @@ from portfolio_engine import optimize_portfolio
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index, load_stock_data_h1
 
-from smart_money import (
-    sector_money_flow,
-    pick_leaders
-)
-
+from smart_money import sector_money_flow, pick_leaders
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
 from entry import validate_entry
@@ -89,29 +85,6 @@ def market_regime(df_index):
 
 
 # =========================
-# REGIME CONFIG
-# =========================
-def regime_config(mode):
-
-    if mode == "AGGRESSIVE":
-        return {
-            "position_scale": 1.0,
-            "score_boost": 1.2
-        }
-
-    if mode == "NEUTRAL":
-        return {
-            "position_scale": 0.7,
-            "score_boost": 1.0
-        }
-
-    return {
-        "position_scale": 0.4,
-        "score_boost": 0.8
-    }
-
-
-# =========================
 # MAIN
 # =========================
 def main():
@@ -119,12 +92,9 @@ def main():
     print("🚀 START BOT V4")
 
     df_symbols = load_symbols()
-    print("TOTAL SYMBOLS:", len(df_symbols))
-
     df_index = load_index()
 
     mode, m_score = market_regime(df_index)
-    cfg = regime_config(mode)
 
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
@@ -154,7 +124,7 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 🔥 SCORING (FIXED)
+    # SCORING
     # =========================
     scored = []
 
@@ -166,17 +136,10 @@ def main():
             if df is None or len(df) < 30:
                 continue
 
-            # =========================
-            # LIQUIDITY SCORE (SOFT)
-            # =========================
             df["value"] = df["close"] * df["volume"]
             avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
-
             liq_score = np.tanh(avg_value_20 / 1e9)
 
-            # =========================
-            # FEATURES
-            # =========================
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
             inst = institutional_score(df)
@@ -184,9 +147,6 @@ def main():
             mf = money_flow_score(df)
             flow_acc = flow_timeline(df)
 
-            # =========================
-            # FIND SECTOR ROW
-            # =========================
             sector_row = next(
                 (r for _, r in top_sectors.iterrows()
                  if symbol in pick_leaders(df_symbols, r["sector"])["symbol"].values),
@@ -196,9 +156,6 @@ def main():
             if sector_row is None:
                 continue
 
-            # =========================
-            # LEADER SCORE
-            # =========================
             leader_score = compute_leader_score(
                 rs=rs,
                 rotation_score=sector_row["rotation_score"],
@@ -210,7 +167,6 @@ def main():
                 voe=voe
             )
 
-            # 🔥 liquidity adjustment
             leader_score *= (0.7 + 0.6 * liq_score)
 
             scored.append((symbol, leader_score))
@@ -228,13 +184,14 @@ def main():
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
-    data_map = {}
-    for symbol in leaders:
-        try:
-            data_map[symbol] = load_stock_data(symbol)
-        except:
-            pass
-            
+    # =========================
+    # PRELOAD DATA
+    # =========================
+    data_map = {
+        s: load_stock_data(s)
+        for s in leaders
+    }
+
     # =========================
     # ENTRY
     # =========================
@@ -242,11 +199,12 @@ def main():
 
     signals = []
     equity = 100000
+    peak_equity = equity   # 🔥 FIX
 
     for symbol in leaders:
 
         try:
-            df = load_stock_data(symbol)
+            df = data_map.get(symbol)
 
             if df is None or len(df) < 30:
                 continue
@@ -263,7 +221,6 @@ def main():
             except:
                 mtf_score = 0
 
-            # RR
             risk = f["entry"] - f["sl"]
             reward = f["tp1"] - f["entry"]
 
@@ -272,21 +229,10 @@ def main():
 
             rr = min(reward / risk, 5)
 
-            type_weight = {
-                "EARLY_BREAKOUT": 1.8,
-                "PRE": 1.6,
-                "EARLY": 1.3,
-                "STRONG": 1.0,
-                "PULLBACK": 1.1
-            }
-
-            base_score = rr * type_weight.get(f["type"], 1.0)
+            base_score = rr
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            final_score = base_score
-            final_score *= (1 + system_score * 0.1)
-            final_score *= (1 + mtf_score * 0.3)
-            final_score *= cfg["score_boost"]
+            final_score = base_score * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
 
             signal = {
                 "symbol": symbol,
@@ -297,17 +243,16 @@ def main():
                 "rr": rr,
                 "type": f["type"],
                 "score": final_score,
-                "risk_scale": cfg["position_scale"],
                 "mtf_score": round(mtf_score, 2)
             }
 
-            #size = position_size(equity, signal, mode)
-            df_full = load_stock_data(symbol)
+            # 🔥 FIX: pass peak_equity
             size = position_size(
                 equity=equity,
                 signal=signal,
-                mode=mode,
-                df=df_full
+                regime=mode,
+                df=df,
+                peak_equity=peak_equity
             )
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
@@ -326,11 +271,18 @@ def main():
         except Exception as e:
             print(symbol, "ERROR:", str(e))
 
-    #signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+    # =========================
+    # PORTFOLIO OPT
+    # =========================
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
     signals = optimize_portfolio(signals, data_map, equity)
 
     print("\nTOTAL SIGNAL:", len(signals))
+
+    # =========================
+    # UPDATE PEAK (REAL SYSTEM SHOULD DO THIS AFTER TRADE)
+    # =========================
+    peak_equity = max(peak_equity, equity)
 
     if signals:
 
