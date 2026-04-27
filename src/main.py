@@ -228,6 +228,13 @@ def main():
 
     print("\n🔥 STRONG LEADERS:", leaders)
 
+    data_map = {}
+    for symbol in leaders:
+        try:
+            data_map[symbol] = load_stock_data(symbol)
+            except:
+                pass
+            
     # =========================
     # ENTRY
     # =========================
