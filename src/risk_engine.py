@@ -6,16 +6,16 @@ from adaptive_winrate import estimate_winrate
 # CONFIG
 # =========================
 MAX_RISK_PER_TRADE = 0.02   # 2%
-KELLY_FRACTION = 0.5        # dùng 50% Kelly
-MIN_RISK = 0.002           # floor 0.2%
-MAX_POSITION = 0.3         # max 30% vốn
+KELLY_FRACTION = 0.5
+MIN_RISK = 0.002
+MAX_POSITION = 0.3
 
-TARGET_VOL = 0.12          # annualized target vol
+TARGET_VOL = 0.12
 VOL_LOOKBACK = 20
 
 
 # =========================
-# KELLY CALC
+# KELLY
 # =========================
 def kelly_fraction(winrate, rr):
 
@@ -23,7 +23,6 @@ def kelly_fraction(winrate, rr):
         return 0
 
     k = winrate - (1 - winrate) / rr
-
     return max(k, 0)
 
 
@@ -39,8 +38,6 @@ def compute_volatility(df):
             return 0.02
 
         vol = returns.rolling(VOL_LOOKBACK).std().iloc[-1]
-
-        # annualize
         vol = vol * np.sqrt(252)
 
         return max(vol, 0.01)
@@ -58,11 +55,16 @@ def volatility_adjustment(vol):
         return 1
 
     adj = TARGET_VOL / vol
-
-    # tránh scale quá mạnh
     return np.clip(adj, 0.5, 1.5)
 
+
+# =========================
+# DRAWDOWN SCALE
+# =========================
 def drawdown_adjustment(equity, peak):
+
+    if peak <= 0:
+        return 1
 
     dd = (peak - equity) / peak
 
@@ -74,11 +76,12 @@ def drawdown_adjustment(equity, peak):
         return 0.6
     else:
         return 0.4
-        
+
+
 # =========================
 # MAIN POSITION SIZE
 # =========================
-def position_size(equity, signal, regime, df):
+def position_size(equity, signal, regime, df, peak_equity):
 
     entry = signal["entry"]
     sl = signal["sl"]
@@ -100,8 +103,12 @@ def position_size(equity, signal, regime, df):
     kelly = kelly_fraction(winrate, rr)
     kelly_adj = kelly * KELLY_FRACTION
 
+    # anti overconfidence
+    if winrate > 0.6:
+        kelly_adj *= 0.8
+
     # =========================
-    # 🔥 REGIME SCALE
+    # 🔥 REGIME
     # =========================
     regime_map = {
         "AGGRESSIVE": 1.0,
@@ -112,17 +119,22 @@ def position_size(equity, signal, regime, df):
     regime_scale = regime_map.get(regime, 0.7)
 
     # =========================
-    # 🔥 VOL ADJUST
+    # 🔥 VOL
     # =========================
     vol = compute_volatility(df)
     vol_adj = volatility_adjustment(vol)
 
     # =========================
+    # 🔥 DRAWDOWN
+    # =========================
+    dd_scale = drawdown_adjustment(equity, peak_equity)
+
+    # =========================
     # 🔥 FINAL RISK %
     # =========================
-    risk_pct = kelly_adj * regime_scale * vol_adj
+    risk_pct = kelly_adj * regime_scale * vol_adj * dd_scale
 
-    # clamp: cực kỳ quan trọng
+    # clamp
     risk_pct = max(MIN_RISK, min(risk_pct, MAX_RISK_PER_TRADE))
 
     # =========================
