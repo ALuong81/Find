@@ -10,7 +10,6 @@ from sector_rotation import sector_rotation
 from relative_strength import relative_strength
 from entry import validate_entry
 from voe import voe_score
-from accumulation import detect_accumulation
 
 from institutional import institutional_score
 from institutional_flow import institutional_flow_score
@@ -20,7 +19,6 @@ from flow_timeline import flow_timeline
 from mtf_confirm import mtf_confirm
 from tracker import log_trade
 
-# 🔥 NEW
 from leader_score import compute_leader_score
 from risk_engine import position_size
 
@@ -155,61 +153,69 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # 🔥 FULL SCORING (WITH LIQUIDITY FILTER)
+    # 🔥 SCORING (FIXED)
     # =========================
     scored = []
 
-    for _, row in top_sectors.iterrows():
+    for symbol in leaders:
 
-        sector_stocks = pick_leaders(df_symbols, row["sector"])
+        try:
+            df = load_stock_data(symbol)
 
-        for _, s in sector_stocks.iterrows():
+            if df is None or len(df) < 30:
+                continue
 
-            symbol = s["symbol"]
+            # =========================
+            # LIQUIDITY SCORE (SOFT)
+            # =========================
+            df["value"] = df["close"] * df["volume"]
+            avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
 
-            try:
-                df = load_stock_data(symbol)
+            liq_score = np.tanh(avg_value_20 / 1e9)
 
-                if df is None or len(df) < 50:
-                    continue
+            # =========================
+            # FEATURES
+            # =========================
+            rs = relative_strength(df, df_index)
+            voe = voe_score(df, df_index)
+            inst = institutional_score(df)
+            inst_flow = institutional_flow_score(df)
+            mf = money_flow_score(df)
+            flow_acc = flow_timeline(df)
 
-                # =========================
-                # 🔥 LIQUIDITY FILTER
-                # =========================
-                df["value"] = df["close"] * df["volume"]
-                avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
+            # =========================
+            # FIND SECTOR ROW
+            # =========================
+            sector_row = next(
+                (r for _, r in top_sectors.iterrows()
+                 if symbol in pick_leaders(df_symbols, r["sector"])["symbol"].values),
+                None
+            )
 
-                if avg_value_20 < 8e8:
-                    continue
+            if sector_row is None:
+                continue
 
-                # =========================
-                # FEATURES
-                # =========================
-                rs = relative_strength(df, df_index)
-                voe = voe_score(df, df_index)
-                inst = institutional_score(df)
-                inst_flow = institutional_flow_score(df)
-                mf = money_flow_score(df)
-                flow_acc = flow_timeline(df)
+            # =========================
+            # LEADER SCORE
+            # =========================
+            leader_score = compute_leader_score(
+                rs=rs,
+                rotation_score=sector_row["rotation_score"],
+                rs_sector=rs - sector_row.get("sector_return", 0),
+                inst=inst,
+                inst_flow=inst_flow,
+                mf=mf,
+                flow_timeline=flow_acc,
+                voe=voe
+            )
 
-                # =========================
-                # 🔥 LEADER SCORE (NEW CORE)
-                # =========================
-                leader_score = compute_leader_score(
-                    rs=rs,
-                    rotation_score=row["rotation_score"],
-                    rs_sector=rs - row.get("sector_return", 0),
-                    inst=inst,
-                    inst_flow=inst_flow,
-                    mf=mf,
-                    flow_timeline=flow_acc,
-                    voe=voe
-                )
+            # 🔥 liquidity adjustment
+            leader_score *= (0.7 + 0.6 * liq_score)
 
-                scored.append((symbol, leader_score))
+            scored.append((symbol, leader_score))
 
-            except Exception as e:
-                print(symbol, "SCORING ERROR:", str(e))
+        except Exception as e:
+            print(symbol, "SCORING ERROR:", str(e))
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
@@ -234,7 +240,7 @@ def main():
         try:
             df = load_stock_data(symbol)
 
-            if df is None or len(df) < 50:
+            if df is None or len(df) < 30:
                 continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
@@ -242,18 +248,14 @@ def main():
             if not ok or f is None:
                 continue
 
-            # =========================
-            # MTF SCORE
-            # =========================
+            # MTF
             try:
                 df_h1 = load_stock_data_h1(symbol)
                 mtf_score = mtf_confirm(df, df_h1) if df_h1 is not None else 0
             except:
                 mtf_score = 0
 
-            # =========================
             # RR
-            # =========================
             risk = f["entry"] - f["sl"]
             reward = f["tp1"] - f["entry"]
 
@@ -271,7 +273,6 @@ def main():
             }
 
             base_score = rr * type_weight.get(f["type"], 1.0)
-
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
             final_score = base_score
@@ -292,9 +293,6 @@ def main():
                 "mtf_score": round(mtf_score, 2)
             }
 
-            # =========================
-            # 🔥 RISK ENGINE
-            # =========================
             size = position_size(equity, signal, mode)
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
@@ -317,9 +315,6 @@ def main():
 
     print("\nTOTAL SIGNAL:", len(signals))
 
-    # =========================
-    # TELEGRAM
-    # =========================
     if signals:
 
         msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
