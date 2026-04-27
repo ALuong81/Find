@@ -62,7 +62,19 @@ def volatility_adjustment(vol):
     # tránh scale quá mạnh
     return np.clip(adj, 0.5, 1.5)
 
+def drawdown_adjustment(equity, peak):
 
+    dd = (peak - equity) / peak
+
+    if dd < 0.05:
+        return 1.0
+    elif dd < 0.1:
+        return 0.8
+    elif dd < 0.15:
+        return 0.6
+    else:
+        return 0.4
+        
 # =========================
 # MAIN POSITION SIZE
 # =========================
