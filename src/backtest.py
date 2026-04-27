@@ -19,11 +19,11 @@ from adaptive_winrate import record_trade
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
-MAX_TRADES_PER_DAY = 2  # 🔥 LIMIT TRADE
+MAX_TRADES_PER_DAY = 2
 
 
 # =========================
-# 🔥 MARKET REGIME
+# MARKET REGIME
 # =========================
 def market_regime(df_index):
 
@@ -53,7 +53,7 @@ def market_regime(df_index):
 
 
 # =========================
-# ✅ FIX: SIMULATE REALISTIC
+# SIMULATE
 # =========================
 def simulate_trade(df, entry, sl, tp):
 
@@ -63,13 +63,11 @@ def simulate_trade(df, entry, sl, tp):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # 🔥 GAP LOGIC
         if o <= sl:
             return -1
         if o >= tp:
             return 1
 
-        # 🔥 BOTH HIT → CONSERVATIVE (SL first)
         if l <= sl and h >= tp:
             return -1
 
@@ -123,7 +121,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# 🔥 BACKTEST FINAL FIXED
+# BACKTEST
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -156,15 +154,9 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, _ = market_regime(df_index)
 
-        # =========================
-        # ❌ NO TRADE IN DEFENSIVE
-        # =========================
         if mode == "DEFENSIVE":
             continue
 
-        # =========================
-        # 🔥 POSITION SIZING
-        # =========================
         if mode == "AGGRESSIVE":
             risk_pct = 0.025
             score_threshold = -0.5
@@ -172,9 +164,6 @@ def run_backtest(start_date="2023-01-01"):
             risk_pct = 0.015
             score_threshold = -0.2
 
-        # =========================
-        # SECTOR
-        # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
             sector_df = sector_rotation(sector_df)
@@ -193,7 +182,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # 🔥 SCORING
+        # SCORING
         # =========================
         scored = []
 
@@ -240,11 +229,10 @@ def run_backtest(start_date="2023-01-01"):
         if not scored:
             continue
 
-        # 🔥 chỉ lấy top chất lượng
         leaders = [s[0] for s in scored[:5]]
 
         # =========================
-        # ENTRY + LIMIT TRADE
+        # ENTRY
         # =========================
         trades_today = 0
 
@@ -253,23 +241,14 @@ def run_backtest(start_date="2023-01-01"):
             if trades_today >= MAX_TRADES_PER_DAY:
                 break
 
-            if symbol not in data_map:
-                continue
-
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
-
-            if len(df) < 50:
-                continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
 
             if not ok:
                 continue
 
-            # =========================
-            # 🔥 RR FILTER
-            # =========================
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
             if rr < 1.0:
@@ -288,7 +267,7 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # 🔥 POSITION SIZING
+            # POSITION UPDATE
             # =========================
             risk_amount = equity * risk_pct
 
@@ -296,6 +275,18 @@ def run_backtest(start_date="2023-01-01"):
                 equity += risk_amount * rr
             elif result == -1:
                 equity -= risk_amount
+
+            # =========================
+            # 🔥 BUILD SIGNAL + RECORD
+            # =========================
+            signal = {
+                "type": f.get("type", "UNKNOWN"),
+                "rr": rr,
+                "mtf_score": 0,  # backtest chưa có MTF → để 0
+                "regime": mode
+            }
+
+            record_trade(signal, result)
 
             history.append({
                 "date": date,
@@ -306,6 +297,6 @@ def run_backtest(start_date="2023-01-01"):
                 "regime": mode
             })
 
-            trades_today += 1  # 🔥 increment
-            #record_trade(signal, result)
+            trades_today += 1
+
     return pd.DataFrame(history)
