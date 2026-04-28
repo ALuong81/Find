@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import os
 from collections import defaultdict
 
 # =========================
@@ -7,49 +8,64 @@ from collections import defaultdict
 # =========================
 BASE_THRESHOLD = 0.55
 MIN_SAMPLES = 5
-DECAY = 0.97  # memory decay
+DECAY = 0.97
 
 META_FILE = "meta_stats.json"
 
 
 # =========================
-# STORAGE (PERSISTENT)
+# STORAGE
 # =========================
 stats = defaultdict(lambda: {"win": 0.0, "loss": 0.0})
 
 
 # =========================
-# LOAD / SAVE
+# LOAD / SAVE (SAFE)
 # =========================
-def save_meta():
-    try:
-        with open(META_FILE, "w") as f:
-            json.dump(dict(stats), f)
-    except Exception as e:
-        print("❌ SAVE META ERROR:", str(e))
-
-
 def load_meta():
+
     global stats
+
+    if not os.path.exists(META_FILE):
+        print("⚠️ META FILE NOT FOUND → INIT NEW")
+        return
+
     try:
         with open(META_FILE, "r") as f:
             data = json.load(f)
 
-            for k, v in data.items():
-                stats[k]["win"] = v.get("win", 0)
-                stats[k]["loss"] = v.get("loss", 0)
+        for k, v in data.items():
+            stats[k]["win"] = float(v.get("win", 0))
+            stats[k]["loss"] = float(v.get("loss", 0))
 
-        print("✅ META LOADED:", len(stats), "patterns")
+        print(f"✅ META LOADED: {len(stats)} patterns")
 
     except Exception as e:
-        print("⚠️ NO META FILE → INIT NEW", str(e))
+        print("❌ LOAD META ERROR:", str(e))
 
-# 🔥 LOAD NGAY KHI IMPORT
-load_meta()
+
+def save_meta():
+
+    try:
+        with open(META_FILE, "w") as f:
+            json.dump(dict(stats), f)
+
+    except Exception as e:
+        print("❌ SAVE META ERROR:", str(e))
+
+
+# ⚠️ CHỈ LOAD 1 LẦN DUY NHẤT
+_meta_loaded = False
+
+def ensure_meta_loaded():
+    global _meta_loaded
+    if not _meta_loaded:
+        load_meta()
+        _meta_loaded = True
 
 
 # =========================
-# KEY BUILDER
+# KEY BUILDER (IMPROVED)
 # =========================
 def build_key(signal):
 
@@ -57,12 +73,13 @@ def build_key(signal):
     type_ = signal.get("type", "UNK")
     regime = signal.get("regime", "UNK")
     mtf = signal.get("mtf_score", 0)
+    meta_hint = signal.get("score", 0)
 
-    # bucket hóa
-    rr_bucket = round(min(rr, 3))        # 1,2,3
-    mtf_bucket = int(mtf > 0)            # 0/1
+    rr_bucket = round(min(rr, 3))
+    mtf_bucket = int(mtf > 0)
+    score_bucket = int(meta_hint > 1.5)
 
-    return f"{type_}|{regime}|rr{rr_bucket}|mtf{mtf_bucket}"
+    return f"{type_}|{regime}|rr{rr_bucket}|mtf{mtf_bucket}|s{score_bucket}"
 
 
 # =========================
@@ -70,33 +87,25 @@ def build_key(signal):
 # =========================
 def update_meta(signal, result):
 
+    ensure_meta_loaded()
+
     key = build_key(signal)
 
-    # =========================
-    # DECAY (giảm ảnh hưởng quá khứ)
-    # =========================
+    # DECAY
     stats[key]["win"] *= DECAY
     stats[key]["loss"] *= DECAY
 
-    # =========================
     # UPDATE
-    # =========================
     if result == 1:
         stats[key]["win"] += 1
     elif result == -1:
         stats[key]["loss"] += 1
-
-    # =========================
-    # SAVE
-    # =========================
-    save_meta()
 
 
 # =========================
 # BAYES WINRATE
 # =========================
 def bayes_winrate(win, loss):
-
     return (win + 1) / (win + loss + 2)
 
 
@@ -114,9 +123,11 @@ def confidence(win, loss):
 
 
 # =========================
-# META SCORE V2
+# META SCORE
 # =========================
 def compute_meta_score(signal):
+
+    ensure_meta_loaded()
 
     key = build_key(signal)
     data = stats[key]
@@ -130,17 +141,11 @@ def compute_meta_score(signal):
     rr = signal.get("rr", 1)
     mtf = signal.get("mtf_score", 0)
 
-    # =========================
-    # COMPONENTS
-    # =========================
+    # components
     rr_score = np.tanh(rr / 2)
     mtf_score = np.tanh(mtf)
-
     edge = np.tanh((wr - 0.5) * 5)
 
-    # =========================
-    # FINAL SCORE
-    # =========================
     meta = (
         0.35 * rr_score +
         0.25 * mtf_score +
@@ -152,7 +157,7 @@ def compute_meta_score(signal):
 
 
 # =========================
-# ADAPTIVE THRESHOLD
+# THRESHOLD
 # =========================
 def get_threshold(regime):
 
@@ -168,6 +173,8 @@ def get_threshold(regime):
 # FILTER
 # =========================
 def meta_filter_v2(signal):
+
+    ensure_meta_loaded()
 
     regime = signal.get("regime", "NEUTRAL")
 
