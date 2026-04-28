@@ -322,7 +322,7 @@ def main():
     else:
         print("⚠️ NO SIGNAL")
 
-    save_meta()   # 🔥 lưu learning
-
 if __name__ == "__main__":
     main()
+    save_meta()   # 🔥 lưu learning
+
