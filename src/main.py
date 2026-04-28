@@ -96,7 +96,7 @@ def market_regime(df_index):
 def main():
 
     print("🚀 START BOT V4")
-    load_meta()   # 🔥 BẮT BUỘC
+    #load_meta()   # 🔥 BẮT BUỘC
     
     df_symbols = load_symbols()
     df_index = load_index()
@@ -324,5 +324,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-    save_meta()   # 🔥 lưu learning
+    #save_meta()   # 🔥 lưu learning
 
