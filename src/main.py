@@ -104,7 +104,7 @@ def main():
     # 🔥 FIX: không được skip hoàn toàn DEFENSIVE
     if mode == "DEFENSIVE":
         print("⚠️ DEFENSIVE → giảm risk, KHÔNG tắt bot")
-
+    
     symbol_to_sector = {
         row["symbol"]: row["sector"]
         for _, row in df_symbols.iterrows()
