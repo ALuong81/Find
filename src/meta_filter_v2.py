@@ -162,7 +162,7 @@ def get_threshold(regime):
     elif regime == "NEUTRAL":
         return BASE_THRESHOLD
     else:
-        return BASE_THRESHOLD + 0.1
+        return BASE_THRESHOLD + 0.03
 
 
 # =========================
