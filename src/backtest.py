@@ -14,8 +14,10 @@ from institutional import institutional_score
 from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
-from adaptive_winrate import record_trade
-from meta_filter_v2 import update_meta
+
+# 🔥 V4
+from meta_filter_v4 import meta_filter_v4
+from meta_filter_v3_5 import update_model
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
@@ -121,7 +123,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (FINAL CLEAN)
+# BACKTEST V4
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -149,9 +151,6 @@ def run_backtest(start_date="2023-01-01"):
         if date < start_date:
             continue
 
-        # =========================
-        # UPDATE PEAK
-        # =========================
         peak_equity = max(peak_equity, equity)
 
         df_index = df_index_full[df_index_full["date"] <= date]
@@ -165,10 +164,10 @@ def run_backtest(start_date="2023-01-01"):
             continue
 
         if mode == "AGGRESSIVE":
-            risk_pct = 0.025
+            base_risk_pct = 0.025
             score_threshold = -0.5
         else:
-            risk_pct = 0.015
+            base_risk_pct = 0.015
             score_threshold = -0.2
 
         # =========================
@@ -186,8 +185,7 @@ def run_backtest(start_date="2023-01-01"):
 
         for _, row in top_sectors.iterrows():
             stocks = pick_leaders(df_symbols, row["sector"])
-            for _, s in stocks.iterrows():
-                leaders.append(s["symbol"])
+            leaders += stocks["symbol"].tolist()
 
         leaders = list(set(leaders))
 
@@ -259,12 +257,27 @@ def run_backtest(start_date="2023-01-01"):
 
             ok, f = validate_entry(df, symbol, regime=mode)
 
-            if not ok or f is None:
+            if not ok:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
             if rr < 1.0:
+                continue
+
+            # =========================
+            # 🔥 META FILTER V4
+            # =========================
+            signal = {
+                "type": f.get("type", "UNKNOWN"),
+                "rr": rr,
+                "mtf_score": 0,
+                "regime": mode
+            }
+
+            ok_meta, prob, p2, p3 = meta_filter_v4(signal)
+
+            if not ok_meta:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -280,7 +293,7 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # DRAWDOWN CONTROL
+            # 🔥 DRAW DOWN
             # =========================
             if peak_equity <= 0:
                 dd_scale = 1
@@ -296,7 +309,12 @@ def run_backtest(start_date="2023-01-01"):
                 else:
                     dd_scale = 0.3
 
-            risk_amount = equity * risk_pct * dd_scale
+            # =========================
+            # 🔥 AI SCALE (NEW)
+            # =========================
+            ai_scale = 0.7 + prob
+
+            risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
             # =========================
             # APPLY RESULT
@@ -307,17 +325,9 @@ def run_backtest(start_date="2023-01-01"):
                 equity -= risk_amount
 
             # =========================
-            # RECORD TRADE (QUAN TRỌNG)
+            # 🔥 LEARNING (CRITICAL)
             # =========================
-            signal = {
-                "type": f.get("type", "UNKNOWN"),
-                "rr": rr,
-                "mtf_score": 0,
-                "regime": mode
-            }
-            update_meta(signal, result)
-            
-            #record_trade(signal, result)
+            update_model(signal, result, equity, peak_equity)
 
             history.append({
                 "date": date,
@@ -325,7 +335,10 @@ def run_backtest(start_date="2023-01-01"):
                 "result": result,
                 "equity": equity,
                 "rr": rr,
-                "regime": mode
+                "regime": mode,
+                "meta_prob": prob,
+                "meta_v2": p2,
+                "meta_v3": p3
             })
 
             trades_today += 1
