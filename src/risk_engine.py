@@ -84,95 +84,76 @@ def drawdown_adjustment(equity, peak):
 def position_size(equity, signal, regime, peak_equity):
 
     entry = signal["entry"]
-
     sl = signal["sl"]
-
     rr = signal["rr"]
 
     risk_per_share = abs(entry - sl)
 
     if risk_per_share <= 0:
-
         return 0
 
     # =========================
-
     # WINRATE
-
     # =========================
-
     winrate = estimate_winrate(signal)
 
     # =========================
-
     # KELLY
-
     # =========================
-
     kelly = kelly_fraction(winrate, rr)
-
     kelly_adj = kelly * KELLY_FRACTION
 
     # anti overconfidence
-
     if winrate > 0.6:
-
         kelly_adj *= 0.8
 
     # =========================
-
     # REGIME
-
     # =========================
-
     regime_map = {
-
         "AGGRESSIVE": 1.0,
-
         "NEUTRAL": 0.7,
-
         "DEFENSIVE": 0.4
-
     }
 
     regime_scale = regime_map.get(regime, 0.7)
 
     # =========================
-
     # DRAWDOWN
-
     # =========================
-
     dd_scale = drawdown_adjustment(equity, peak_equity)
 
     # =========================
-
-    # FINAL RISK %
-
+    # BASE RISK %
     # =========================
-
     risk_pct = kelly_adj * regime_scale * dd_scale
 
+    # =========================
+    # 🔥 ENSEMBLE CONFIDENCE (NEW)
+    # =========================
+    meta_v2 = signal.get("meta_v2", 0.5)
+    meta_v3 = signal.get("meta_v3", 0.5)
+
+    confidence = 1 - abs(meta_v2 - meta_v3)
+
+    # scale risk theo độ đồng thuận AI
+    risk_pct *= (0.7 + 0.6 * confidence)
+
+    # =========================
+    # CLAMP
+    # =========================
     risk_pct = max(MIN_RISK, min(risk_pct, MAX_RISK_PER_TRADE))
 
     # =========================
-
     # SIZE
-
     # =========================
-
     risk_amount = equity * risk_pct
-
     size = risk_amount / risk_per_share
 
     # =========================
-
     # POSITION CAP
-
     # =========================
-
     max_size = (equity * MAX_POSITION) / entry
-
     size = min(size, max_size)
 
     return max(size, 0)
