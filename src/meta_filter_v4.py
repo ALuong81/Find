@@ -8,6 +8,7 @@ from meta_filter_v3_5 import meta_filter_v3_5
 # CONFIG
 # =========================
 BASE_THRESHOLD = 0.55
+DEBUG = True   # 🔥 bật/tắt debug tại đây
 
 
 # =========================
@@ -19,28 +20,20 @@ def get_weights(signal):
     rr = signal.get("rr", 1)
     mtf = signal.get("mtf_score", 0)
 
-    # base
     w_v2 = 0.5
     w_v3 = 0.5
 
-    # =========================
-    # REGIME ADAPT
-    # =========================
     if regime == "AGGRESSIVE":
-        w_v3 += 0.2   # trust ML hơn
+        w_v3 += 0.2
     elif regime == "DEFENSIVE":
-        w_v2 += 0.2   # trust rule hơn
+        w_v2 += 0.2
 
-    # =========================
-    # FEATURE ADAPT
-    # =========================
     if rr > 2:
         w_v3 += 0.1
 
     if mtf > 0:
         w_v3 += 0.1
 
-    # normalize
     total = w_v2 + w_v3
     return w_v2 / total, w_v3 / total
 
@@ -59,7 +52,7 @@ def disagreement_penalty(p1, p2):
     elif diff < 0.3:
         return 0.7
     else:
-        return 0.5   # 🔥 conflict lớn → giảm mạnh
+        return 0.5
 
 
 # =========================
@@ -80,6 +73,23 @@ def get_threshold(signal):
 
 
 # =========================
+# DEBUG LOGGER
+# =========================
+def debug_log(signal, prob, prob2, prob3, th, conf):
+
+    if not DEBUG:
+        return
+
+    print(
+        f"[META V4] {signal.get('symbol','?')} | "
+        f"prob={prob:.3f} | v2={prob2:.3f} | v3={prob3:.3f} | "
+        f"th={th:.3f} | conf={conf:.3f} | "
+        f"rr={signal.get('rr',0):.2f} | "
+        f"regime={signal.get('regime')}"
+    )
+
+
+# =========================
 # MAIN ENSEMBLE
 # =========================
 def meta_filter_v4(signal):
@@ -90,7 +100,6 @@ def meta_filter_v4(signal):
     ok2, score2, wr, conf = meta_filter_v2(signal)
     ok3, prob3 = meta_filter_v3_5(signal)
 
-    # normalize V2 score về prob-like
     prob2 = np.clip(score2, 0, 1)
 
     # =========================
@@ -110,14 +119,28 @@ def meta_filter_v4(signal):
     prob *= penalty
 
     # =========================
-    # FINAL DECISION
+    # THRESHOLD
     # =========================
     th = get_threshold(signal)
 
+    # =========================
+    # DEBUG
+    # =========================
+    debug_log(signal, prob, prob2, prob3, th, conf)
+
+    # =========================
+    # LOW CONF → SOFT MODE
+    # =========================
+    if conf < 0.4:
+        if prob > (th - 0.05):
+            return True, prob, prob2, prob3
+        else:
+            return False, prob, prob2, prob3
+
+    # =========================
+    # NORMAL DECISION
+    # =========================
     if prob < th:
         return False, prob, prob2, prob3
 
-    if conf < 0.4:
-        return True, score, wr, conf
-    
     return True, prob, prob2, prob3
