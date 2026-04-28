@@ -18,7 +18,10 @@ from tracker import log_trade
 
 from leader_score import compute_leader_score
 from risk_engine import position_size
-from meta_filter_v2 import meta_filter_v2
+
+# 🔥 NEW
+from meta_filter_v4 import meta_filter_v4
+from meta_filter_v3_5 import update_model
 
 import os
 import requests
@@ -96,7 +99,6 @@ def main():
     df_index = load_index()
 
     mode, m_score = market_regime(df_index)
-
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
     # =========================
@@ -176,17 +178,16 @@ def main():
             print(symbol, "SCORING ERROR:", str(e))
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
-
     leaders = [s[0] for s in scored[:12]]
 
     # =========================
-    # PRELOAD
+    # PRELOAD (FIX)
     # =========================
-    data_map = {
-        s: load_stock_data(s)
-        for s in leaders
-        if load_stock_data(s) is not None
-    }
+    data_map = {}
+    for s in leaders:
+        df = load_stock_data(s)
+        if df is not None:
+            data_map[s] = df
 
     # =========================
     # ENTRY
@@ -213,8 +214,6 @@ def main():
                 continue
 
             rr = reward / risk
-
-            # 🔥 FILTER RR
             if rr < 1.0:
                 continue
 
@@ -241,22 +240,20 @@ def main():
                 "rr": rr,
                 "type": f["type"],
                 "score": final_score,
-                "mtf_score": round(mtf_score, 2)
+                "mtf_score": round(mtf_score, 2),
+                "regime": mode   # 🔥 CRITICAL
             }
 
             # =========================
-            # 🔥 META FILTER V2
+            # 🔥 META FILTER V4
             # =========================
-            ok_meta, meta_score, wr, conf = meta_filter_v2(signal)
+            ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
             if not ok_meta:
                 continue
 
-            # 🔥 SCALE SIZE theo meta
-            meta_scale = np.clip(meta_score, 0.5, 1.5)
-
             # =========================
-            # 🔥 POSITION SIZE (FIXED)
+            # 🔥 POSITION SIZE
             # =========================
             size = position_size(
                 equity=equity,
@@ -266,19 +263,23 @@ def main():
                 peak_equity=peak_equity
             )
 
-            size *= meta_scale
+            # 🔥 scale theo AI confidence
+            size *= (0.7 + prob)
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
 
             signal.update({
                 "size": round(size, 2),
                 "risk_pct": round(risk_pct, 4),
-                "meta_score": round(meta_score, 3),
-                "meta_wr": round(wr, 2),
-                "meta_conf": round(conf, 2)
+                "meta_prob": round(prob, 3),
+                "meta_v2": round(p2, 3),
+                "meta_v3": round(p3, 3)
             })
 
             signals.append(signal)
+
+            # 🔥 LEARNING
+            update_model(signal, result=1, equity=equity, peak_equity=peak_equity)
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
@@ -288,7 +289,7 @@ def main():
             print(symbol, "ERROR:", str(e))
 
     # =========================
-    # PORTFOLIO OPT
+    # PORTFOLIO
     # =========================
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
     signals = optimize_portfolio(signals, data_map, equity)
@@ -304,9 +305,8 @@ def main():
                 f"{s['symbol']} ({s['type']})\n"
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
-                f"TP1: {round(s['tp1'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n"
-                f"Meta: {s['meta_score']}\n"
+                f"AI Prob: {s['meta_prob']}\n"
                 f"Size: {s['size']}\n"
                 f"Risk: {s['risk_pct']*100:.2f}%\n\n"
             )
