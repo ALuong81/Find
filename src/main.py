@@ -19,6 +19,8 @@ from tracker import log_trade
 from leader_score import compute_leader_score
 from risk_engine import position_size
 from meta_filter import meta_filter
+from meta_filter_v2 import meta_filter_v2
+
 
 import os
 import requests
@@ -263,12 +265,17 @@ def main():
             # 🔥 META FILTER
             # =========================
             
-            ok_meta, meta_score = meta_filter(signal, mode)
+            #ok_meta, meta_score = meta_filter(signal, mode)
+            
+            ok_meta, meta_score, wr, conf = meta_filter_v2(signal)
+            
             if not ok_meta:
                 continue
             
             signal["meta_score"] = round(meta_score, 3)
-
+            signal["meta_wr"] = round(wr, 2)
+            signal["meta_conf"] = round(conf, 2)
+            
             # 🔥 FIX: đúng signature
             size = position_size(
                 equity=equity,
