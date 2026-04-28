@@ -22,6 +22,8 @@ from risk_engine import position_size
 # 🔥 NEW
 from meta_filter_v4 import meta_filter_v4
 from meta_filter_v3_5 import update_model
+from meta_filter_v2 import load_meta
+
 
 import os
 import requests
@@ -94,7 +96,8 @@ def market_regime(df_index):
 def main():
 
     print("🚀 START BOT V4")
-
+    load_meta()   # 🔥 BẮT BUỘC
+    
     df_symbols = load_symbols()
     df_index = load_index()
 
@@ -319,6 +322,7 @@ def main():
     else:
         print("⚠️ NO SIGNAL")
 
+    save_meta()   # 🔥 lưu learning
 
 if __name__ == "__main__":
     main()
