@@ -1,3 +1,7 @@
+import os
+import requests
+import numpy as np
+
 from portfolio_engine import optimize_portfolio
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index, load_stock_data_h1
@@ -19,22 +23,16 @@ from tracker import log_trade
 from leader_score import compute_leader_score
 from risk_engine import position_size
 
-# 🔥 NEW
+# 🔥 META V4
 from meta_filter_v4 import meta_filter_v4
 from meta_filter_v3_5 import update_model
 from meta_filter_v2 import load_meta, save_meta
-
-
-import os
-import requests
-import numpy as np
 
 
 # =========================
 # TELEGRAM
 # =========================
 def send_telegram(msg):
-
     token = os.getenv("TELEGRAM_TOKEN")
     chat_id = os.getenv("TELEGRAM_CHAT_ID")
 
@@ -96,8 +94,10 @@ def market_regime(df_index):
 def main():
 
     print("🚀 START BOT V4")
-    #load_meta()   # 🔥 BẮT BUỘC
-    
+
+    # 🔥 BẮT BUỘC LOAD META
+    load_meta()
+
     df_symbols = load_symbols()
     df_index = load_index()
 
@@ -184,9 +184,10 @@ def main():
     leaders = [s[0] for s in scored[:12]]
 
     # =========================
-    # PRELOAD (FIX)
+    # PRELOAD
     # =========================
     data_map = {}
+
     for s in leaders:
         df = load_stock_data(s)
         if df is not None:
@@ -207,7 +208,7 @@ def main():
                 continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
-            if not ok:
+            if not ok or f is None:
                 continue
 
             risk = f["entry"] - f["sl"]
@@ -217,15 +218,10 @@ def main():
                 continue
 
             rr = reward / risk
-        
-            if mode == "DEFENSIVE":
-                if rr < 0.8:
-                    continue
-            else:
-                if rr < 1.0:
-                    if prob < 0.6:
-                        continue            
+
+            # =========================
             # MTF
+            # =========================
             try:
                 df_h1 = load_stock_data_h1(symbol)
                 mtf_score = mtf_confirm(df, df_h1) if df_h1 is not None else 0
@@ -236,11 +232,9 @@ def main():
 
             final_score = rr * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
 
-            sector = symbol_to_sector.get(symbol, "UNKNOWN")
-
             signal = {
                 "symbol": symbol,
-                "sector": sector,
+                "sector": symbol_to_sector.get(symbol, "UNKNOWN"),
                 "entry": f["entry"],
                 "sl": f["sl"],
                 "tp1": f["tp1"],
@@ -249,7 +243,7 @@ def main():
                 "type": f["type"],
                 "score": final_score,
                 "mtf_score": round(mtf_score, 2),
-                "regime": mode   # 🔥 CRITICAL
+                "regime": mode
             }
 
             # =========================
@@ -257,23 +251,30 @@ def main():
             # =========================
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
-            # 🔥 FIX
-            if not ok_meta:
-                if prob < 0.52:   # thay vì reject toàn bộ
+            # 🔥 FIX: SOFT FILTER
+            if not ok_meta and prob < 0.52:
+                continue
+
+            # =========================
+            # RR FILTER SAU META
+            # =========================
+            if mode == "DEFENSIVE":
+                if rr < 0.8 and prob < 0.55:
+                    continue
+            else:
+                if rr < 1.0 and prob < 0.6:
                     continue
 
             # =========================
-            # 🔥 POSITION SIZE
+            # POSITION SIZE
             # =========================
             size = position_size(
                 equity=equity,
                 signal=signal,
                 regime=mode,
-                df=df,
                 peak_equity=peak_equity
             )
 
-            # 🔥 scale theo AI confidence
             size *= (0.7 + prob)
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
@@ -288,12 +289,10 @@ def main():
 
             signals.append(signal)
 
-            # 🔥 LEARNING
-            update_model(signal, result=1, equity=equity, peak_equity=peak_equity)
-
+            # 🔥 KHÔNG FAKE LEARNING Ở LIVE
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            print(f"{symbol} ✅ score={round(final_score,2)} size={round(size,2)}")
+            print(f"{symbol} ✅ prob={round(prob,2)} size={round(size,2)}")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
@@ -326,7 +325,9 @@ def main():
     else:
         print("⚠️ NO SIGNAL")
 
+    # 🔥 SAVE MODEL
+    save_meta()
+
+
 if __name__ == "__main__":
     main()
-    #save_meta()   # 🔥 lưu learning
-
