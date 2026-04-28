@@ -217,10 +217,14 @@ def main():
                 continue
 
             rr = reward / risk
-            if rr < 1.0:
-                if prob < 0.6:
+        
+            if mode == "DEFENSIVE":
+                if rr < 0.8:
                     continue
-            
+            else:
+                if rr < 1.0:
+                    if prob < 0.6:
+                        continue            
             # MTF
             try:
                 df_h1 = load_stock_data_h1(symbol)
