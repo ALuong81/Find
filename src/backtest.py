@@ -15,7 +15,7 @@ from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 from adaptive_winrate import record_trade
-
+from meta_filter_v2 import update_meta
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
@@ -315,8 +315,9 @@ def run_backtest(start_date="2023-01-01"):
                 "mtf_score": 0,
                 "regime": mode
             }
-
-            record_trade(signal, result)
+            update_meta(signal, result)
+            
+            #record_trade(signal, result)
 
             history.append({
                 "date": date,
