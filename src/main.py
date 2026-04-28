@@ -23,9 +23,7 @@ from tracker import log_trade
 from leader_score import compute_leader_score
 from risk_engine import position_size
 
-# 🔥 META V4
 from meta_filter_v4 import meta_filter_v4
-from meta_filter_v3_5 import update_model
 from meta_filter_v2 import load_meta, save_meta
 
 
@@ -95,7 +93,6 @@ def main():
 
     print("🚀 START BOT V4")
 
-    # 🔥 BẮT BUỘC LOAD META
     load_meta()
 
     df_symbols = load_symbols()
@@ -104,9 +101,10 @@ def main():
     mode, m_score = market_regime(df_index)
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
-    # =========================
-    # SYMBOL → SECTOR MAP
-    # =========================
+    # 🔥 FIX: không được skip hoàn toàn DEFENSIVE
+    if mode == "DEFENSIVE":
+        print("⚠️ DEFENSIVE → giảm risk, KHÔNG tắt bot")
+
     symbol_to_sector = {
         row["symbol"]: row["sector"]
         for _, row in df_symbols.iterrows()
@@ -121,7 +119,7 @@ def main():
     top_sectors = sector_df.head(3)
 
     # =========================
-    # RAW LEADERS
+    # LEADERS
     # =========================
     leaders = []
 
@@ -208,7 +206,7 @@ def main():
                 continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
-            if not ok or f is None:
+            if not ok:
                 continue
 
             risk = f["entry"] - f["sl"]
@@ -218,6 +216,10 @@ def main():
                 continue
 
             rr = reward / risk
+
+            # 🔥 FIX: nới RR (để có signal học)
+            if rr < 0.6:
+                continue
 
             # =========================
             # MTF
@@ -247,23 +249,13 @@ def main():
             }
 
             # =========================
-            # 🔥 META FILTER V4
+            # META V4
             # =========================
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
-            # 🔥 FIX: SOFT FILTER
-            if not ok_meta and prob < 0.52:
+            # 🔥 FIX: soft filter
+            if prob < 0.48:
                 continue
-
-            # =========================
-            # RR FILTER SAU META
-            # =========================
-            if mode == "DEFENSIVE":
-                if rr < 0.8 and prob < 0.55:
-                    continue
-            else:
-                if rr < 1.0 and prob < 0.6:
-                    continue
 
             # =========================
             # POSITION SIZE
@@ -272,6 +264,7 @@ def main():
                 equity=equity,
                 signal=signal,
                 regime=mode,
+                df=df,
                 peak_equity=peak_equity
             )
 
@@ -289,10 +282,9 @@ def main():
 
             signals.append(signal)
 
-            # 🔥 KHÔNG FAKE LEARNING Ở LIVE
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            print(f"{symbol} ✅ prob={round(prob,2)} size={round(size,2)}")
+            print(f"{symbol} ✅ prob={round(prob,2)} rr={round(rr,2)}")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
@@ -325,7 +317,6 @@ def main():
     else:
         print("⚠️ NO SIGNAL")
 
-    # 🔥 SAVE MODEL
     save_meta()
 
 
