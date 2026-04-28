@@ -117,4 +117,7 @@ def meta_filter_v4(signal):
     if prob < th:
         return False, prob, prob2, prob3
 
+    if conf < 0.4:
+        return True, score, wr, conf
+    
     return True, prob, prob2, prob3
