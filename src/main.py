@@ -249,8 +249,10 @@ def main():
             # =========================
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
+            # 🔥 FIX
             if not ok_meta:
-                continue
+                if prob < 0.52:   # thay vì reject toàn bộ
+                    continue
 
             # =========================
             # 🔥 POSITION SIZE
