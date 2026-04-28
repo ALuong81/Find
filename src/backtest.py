@@ -18,6 +18,8 @@ from flow_timeline import flow_timeline
 # 🔥 V4
 from meta_filter_v4 import meta_filter_v4
 from meta_filter_v3_5 import update_model
+from meta_filter_v2 import save_meta
+
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
@@ -342,5 +344,7 @@ def run_backtest(start_date="2023-01-01"):
             })
 
             trades_today += 1
+            # sau khi backtest xong
+            save_meta()
 
     return pd.DataFrame(history)
