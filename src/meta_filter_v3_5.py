@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import os
 
 MODEL_FILE = "meta_model_v3_5.json"
 
@@ -7,11 +8,37 @@ FEATURE_SIZE = 8
 BASE_LR = 0.03
 L2_REG = 0.001
 
+MIN_SAMPLES = 30
+
 # =========================
 # INIT
 # =========================
 weights = np.zeros(FEATURE_SIZE)
 bias = 0.0
+sample_count = 0
+
+_model_loaded = False   # 🔥 đảm bảo chỉ load 1 lần
+
+
+# =========================
+# FILE INIT (NEW)
+# =========================
+def init_model_file():
+
+    if not os.path.exists(MODEL_FILE):
+        try:
+            with open(MODEL_FILE, "w") as f:
+                json.dump({
+                    "weights": weights.tolist(),
+                    "bias": bias,
+                    "sample_count": 0
+                }, f)
+
+            print("⚠️ CREATE NEW META MODEL FILE")
+
+        except Exception as e:
+            print("❌ INIT FILE ERROR:", str(e))
+
 
 # =========================
 # LOAD / SAVE
@@ -21,25 +48,40 @@ def save_model():
         with open(MODEL_FILE, "w") as f:
             json.dump({
                 "weights": weights.tolist(),
-                "bias": bias
+                "bias": bias,
+                "sample_count": sample_count
             }, f)
-    except:
-        pass
+    except Exception as e:
+        print("❌ SAVE MODEL ERROR:", str(e))
 
 
 def load_model():
-    global weights, bias
+
+    global weights, bias, sample_count, _model_loaded
+
+    if _model_loaded:
+        return
+
+    init_model_file()   # 🔥 đảm bảo file tồn tại trước
+
     try:
         with open(MODEL_FILE, "r") as f:
             data = json.load(f)
-            weights[:] = data["weights"]
-            bias = data["bias"]
-        print("✅ META V3.5 LOADED")
-    except:
-        print("⚠️ INIT NEW MODEL")
+
+            weights[:] = data.get("weights", weights)
+            bias = data.get("bias", 0.0)
+            sample_count = data.get("sample_count", 0)
+
+        print(f"✅ META V3.5 LOADED | samples={sample_count}")
+
+    except Exception as e:
+        print("❌ LOAD MODEL ERROR:", str(e))
+
+    _model_loaded = True   # 🔥 chỉ load 1 lần
 
 
-load_model()
+# 🔥 KHÔNG auto load khi import
+# load_model()  ❌ remove dòng này
 
 
 # =========================
@@ -56,9 +98,6 @@ def build_features(signal):
     corr = signal.get("correlation", 0)
     liq = signal.get("liquidity", 1)
 
-    # =========================
-    # NORMALIZATION
-    # =========================
     rr_n = np.tanh(rr / 3)
     mtf_n = np.tanh(mtf)
     vol_n = np.tanh(vol * 5)
@@ -83,7 +122,6 @@ def build_features(signal):
 
     type_n = type_map.get(type_, 0.5)
 
-    # interaction terms (🔥 rất quan trọng)
     rr_mtf = rr_n * mtf_n
     rr_regime = rr_n * regime_n
 
@@ -111,8 +149,9 @@ def sigmoid(x):
 # =========================
 def predict(signal):
 
-    X = build_features(signal)
+    load_model()   # 🔥 đảm bảo load trước khi dùng
 
+    X = build_features(signal)
     z = np.dot(weights, X) + bias
     prob = sigmoid(z)
 
@@ -120,7 +159,18 @@ def predict(signal):
 
 
 # =========================
-# ADAPTIVE LR
+# CONFIDENCE
+# =========================
+def confidence():
+
+    if sample_count < MIN_SAMPLES:
+        return 0.3
+
+    return np.tanh(sample_count / 100)
+
+
+# =========================
+# LR
 # =========================
 def get_learning_rate(equity, peak_equity):
 
@@ -140,49 +190,49 @@ def get_learning_rate(equity, peak_equity):
 
 
 # =========================
-# UPDATE MODEL
+# UPDATE
 # =========================
 def update_model(signal, result, equity=1, peak_equity=1):
 
-    global weights, bias
+    global weights, bias, sample_count
+
+    load_model()   # 🔥 đảm bảo load
 
     X = build_features(signal)
     pred = predict(signal)
 
     y = 1 if result == 1 else 0
-
     error = y - pred
 
     lr = get_learning_rate(equity, peak_equity)
 
-    # gradient descent + L2 regularization
     weights += lr * (error * X - L2_REG * weights)
     bias += lr * error
 
-    # 🔥 stability clamp
     weights = np.clip(weights, -3, 3)
     bias = np.clip(bias, -2, 2)
+
+    sample_count += 1
 
     save_model()
 
 
 # =========================
-# DYNAMIC THRESHOLD
+# THRESHOLD
 # =========================
 def get_threshold(signal):
 
     regime = signal.get("regime", "NEUTRAL")
     vol = signal.get("volatility", 0.2)
 
-    base = 0.55
+    base = 0.52
 
     if regime == "AGGRESSIVE":
         base -= 0.05
     elif regime == "DEFENSIVE":
-        base += 0.08
+        base += 0.03
 
-    # high vol → cần chắc hơn
-    base += np.tanh(vol * 2) * 0.05
+    base += np.tanh(vol * 2) * 0.03
 
     return base
 
@@ -194,6 +244,18 @@ def meta_filter_v3_5(signal):
 
     prob = predict(signal)
     th = get_threshold(signal)
+    conf = confidence()
+
+    # 🔥 cold start
+    if sample_count < MIN_SAMPLES:
+        return True, prob
+
+    # 🔥 low confidence
+    if conf < 0.4:
+        if prob > (th - 0.05):
+            return True, prob
+        else:
+            return False, prob
 
     if prob < th:
         return False, prob
