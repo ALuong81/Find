@@ -7,7 +7,7 @@ from meta_filter_v3_5 import meta_filter_v3_5
 # =========================
 # CONFIG
 # =========================
-BASE_THRESHOLD = 0.55
+BASE_THRESHOLD = 0.5
 DEBUG = True   # 🔥 bật/tắt debug tại đây
 
 
@@ -65,9 +65,9 @@ def get_threshold(signal):
     th = BASE_THRESHOLD
 
     if regime == "AGGRESSIVE":
-        th -= 0.05
+        th -= 0.07
     elif regime == "DEFENSIVE":
-        th += 0.03
+        th += 0.02
 
     return th
 
