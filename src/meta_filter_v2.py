@@ -41,9 +41,8 @@ def load_meta():
 
         print("✅ META LOADED:", len(stats), "patterns")
 
-    except:
-        print("⚠️ NO META FILE → INIT NEW")
-
+    except Exception as e:
+        print("⚠️ NO META FILE → INIT NEW", str(e))
 
 # 🔥 LOAD NGAY KHI IMPORT
 load_meta()
