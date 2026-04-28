@@ -163,7 +163,9 @@ def run_backtest(start_date="2023-01-01"):
         mode, _ = market_regime(df_index)
 
         if mode == "DEFENSIVE":
-            continue
+            MAX_TRADES_PER_DAY = 1
+        else:
+            MAX_TRADES_PER_DAY = 2
 
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.025
@@ -279,8 +281,9 @@ def run_backtest(start_date="2023-01-01"):
 
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
-            if not ok_meta and prob < 0.52:
-                continue
+            if not ok_meta:
+                if prob < 0.45:
+                    continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
 
