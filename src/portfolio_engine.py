@@ -29,7 +29,6 @@ def compute_correlation(df1, df2):
 
         corr = np.corrcoef(r1, r2)[0, 1]
 
-        # tránh NaN
         if np.isnan(corr):
             return 0
 
@@ -40,7 +39,25 @@ def compute_correlation(df1, df2):
 
 
 # =========================
-# MAIN OPTIMIZER
+# META SCALE (🔥 NEW)
+# =========================
+def meta_scale(signal):
+
+    # ensemble probability
+    prob = signal.get("meta_prob", 0.5)
+
+    # agreement giữa models
+    v2 = signal.get("meta_v2", 0.5)
+    v3 = signal.get("meta_v3", 0.5)
+
+    confidence = 1 - abs(v2 - v3)
+
+    # final scale
+    return (0.6 + prob) * (0.7 + 0.6 * confidence)
+
+
+# =========================
+# MAIN OPTIMIZER V4
 # =========================
 def optimize_portfolio(signals, data_map, equity):
 
@@ -48,9 +65,16 @@ def optimize_portfolio(signals, data_map, equity):
         return []
 
     # =========================
-    # SORT BY SCORE
+    # 🔥 SORT (AI PRIORITY)
     # =========================
-    signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+    signals = sorted(
+        signals,
+        key=lambda x: (
+            x.get("score", 0) * 0.6 +
+            x.get("meta_prob", 0.5) * 0.4
+        ),
+        reverse=True
+    )
 
     final = []
     sector_count = {}
@@ -73,9 +97,15 @@ def optimize_portfolio(signals, data_map, equity):
             continue
 
         # =========================
-        # CORRELATION ADJUST
+        # 🔥 META SCALE (NEW)
+        # =========================
+        m_scale = meta_scale(s)
+
+        # =========================
+        # CORRELATION
         # =========================
         reduce_factor = 1.0
+        corr_penalty = 0
 
         for f in final:
 
@@ -86,28 +116,41 @@ def optimize_portfolio(signals, data_map, equity):
 
             corr = compute_correlation(df1, df2)
 
-            # 🔥 nếu tương quan cao → giảm size
             if corr > CORR_THRESHOLD:
                 reduce_factor *= 0.5
+                corr_penalty += (corr - CORR_THRESHOLD)
 
         # =========================
-        # APPLY SIZE REDUCTION
+        # APPLY SIZE
         # =========================
-        adj_size = s["size"] * reduce_factor
+        adj_size = s["size"] * reduce_factor * m_scale
 
         risk = adj_size * abs(s["entry"] - s["sl"]) / equity
 
         # =========================
-        # TOTAL RISK LIMIT
+        # 🔥 RISK PRIORITY FILTER
         # =========================
         if total_risk + risk > MAX_TOTAL_RISK:
-            continue
+
+            # nếu trade rất tốt → cho vào 1 phần
+            if s.get("meta_prob", 0.5) > 0.65:
+                remain = MAX_TOTAL_RISK - total_risk
+                if remain <= 0:
+                    continue
+
+                scale = remain / risk
+                adj_size *= scale
+                risk = remain
+            else:
+                continue
 
         # =========================
         # UPDATE SIGNAL
         # =========================
         s["size"] = round(adj_size, 2)
         s["risk_pct"] = round(risk, 4)
+        s["meta_scale"] = round(m_scale, 3)
+        s["corr_penalty"] = round(corr_penalty, 3)
 
         final.append(s)
 
