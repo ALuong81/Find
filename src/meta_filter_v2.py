@@ -1,4 +1,5 @@
 import numpy as np
+import json
 from collections import defaultdict
 
 # =========================
@@ -6,13 +7,46 @@ from collections import defaultdict
 # =========================
 BASE_THRESHOLD = 0.55
 MIN_SAMPLES = 5
-DECAY = 0.97  # memory decay (for future extension)
+DECAY = 0.97  # memory decay
+
+META_FILE = "meta_stats.json"
 
 
 # =========================
-# STORAGE (in-memory)
+# STORAGE (PERSISTENT)
 # =========================
-stats = defaultdict(lambda: {"win": 0, "loss": 0})
+stats = defaultdict(lambda: {"win": 0.0, "loss": 0.0})
+
+
+# =========================
+# LOAD / SAVE
+# =========================
+def save_meta():
+    try:
+        with open(META_FILE, "w") as f:
+            json.dump(dict(stats), f)
+    except Exception as e:
+        print("❌ SAVE META ERROR:", str(e))
+
+
+def load_meta():
+    global stats
+    try:
+        with open(META_FILE, "r") as f:
+            data = json.load(f)
+
+            for k, v in data.items():
+                stats[k]["win"] = v.get("win", 0)
+                stats[k]["loss"] = v.get("loss", 0)
+
+        print("✅ META LOADED:", len(stats), "patterns")
+
+    except:
+        print("⚠️ NO META FILE → INIT NEW")
+
+
+# 🔥 LOAD NGAY KHI IMPORT
+load_meta()
 
 
 # =========================
@@ -39,10 +73,24 @@ def update_meta(signal, result):
 
     key = build_key(signal)
 
+    # =========================
+    # DECAY (giảm ảnh hưởng quá khứ)
+    # =========================
+    stats[key]["win"] *= DECAY
+    stats[key]["loss"] *= DECAY
+
+    # =========================
+    # UPDATE
+    # =========================
     if result == 1:
         stats[key]["win"] += 1
     elif result == -1:
         stats[key]["loss"] += 1
+
+    # =========================
+    # SAVE
+    # =========================
+    save_meta()
 
 
 # =========================
@@ -50,7 +98,6 @@ def update_meta(signal, result):
 # =========================
 def bayes_winrate(win, loss):
 
-    # Beta prior (1,1) → không bias
     return (win + 1) / (win + loss + 2)
 
 
@@ -62,9 +109,9 @@ def confidence(win, loss):
     n = win + loss
 
     if n < MIN_SAMPLES:
-        return 0.3  # low trust
+        return 0.3
 
-    return np.tanh(n / 20)  # saturate
+    return np.tanh(n / 20)
 
 
 # =========================
@@ -93,12 +140,12 @@ def compute_meta_score(signal):
     edge = np.tanh((wr - 0.5) * 5)
 
     # =========================
-    # FINAL
+    # FINAL SCORE
     # =========================
     meta = (
         0.35 * rr_score +
         0.25 * mtf_score +
-        0.25 * edge * conf +   # quan trọng
+        0.25 * edge * conf +
         0.15 * wr
     )
 
