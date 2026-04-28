@@ -1,30 +1,30 @@
+from portfolio_engine import optimize_portfolio
 from symbol_loader import load_symbols
 from data_loader import load_stock_data, load_index, load_stock_data_h1
 
-from smart_money import (
-    market_score,
-    sector_money_flow,
-    pick_leaders
-)
-
+from smart_money import sector_money_flow, pick_leaders
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
 from entry import validate_entry
 from voe import voe_score
-from accumulation import detect_accumulation
 
 from institutional import institutional_score
-from institutional_flow import institutional_flow_score  # 🔥 NEW
+from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
-from market_mode import get_market_mode
 
 from mtf_confirm import mtf_confirm
-
 from tracker import log_trade
+
+from leader_score import compute_leader_score
+from risk_engine import position_size
+from meta_filter import meta_filter
+from meta_filter_v2 import meta_filter_v2
+
 
 import os
 import requests
+import numpy as np
 
 
 # =========================
@@ -51,27 +51,63 @@ def send_telegram(msg):
 
 
 # =========================
+# MARKET REGIME
+# =========================
+def market_regime(df_index):
+
+    try:
+        close = df_index["close"]
+
+        ret_5 = close.pct_change(5).iloc[-1]
+        ret_20 = close.pct_change(20).iloc[-1]
+        vol = close.pct_change().rolling(20).std().iloc[-1]
+
+        ma20 = close.rolling(20).mean().iloc[-1]
+        ma50 = close.rolling(50).mean().iloc[-1]
+
+        trend = 1 if ma20 > ma50 else -1
+
+        score = (
+            ret_5 * 2 +
+            ret_20 * 1.5 -
+            vol * 2 +
+            trend
+        )
+
+        score = np.tanh(score * 3)
+
+        if score > 0.3:
+            return "AGGRESSIVE", score
+        elif score > -0.3:
+            return "NEUTRAL", score
+        else:
+            return "DEFENSIVE", score
+
+    except:
+        return "DEFENSIVE", -1
+
+
+# =========================
 # MAIN
 # =========================
 def main():
 
-    print("🚀 START BOT")
+    print("🚀 START BOT V4")
 
     df_symbols = load_symbols()
-    print("TOTAL SYMBOLS:", len(df_symbols))
+    df_index = load_index()
+
+    mode, m_score = market_regime(df_index)
+
+    print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
     # =========================
-    # MARKET
+    # BUILD SYMBOL → SECTOR MAP (🔥 FIX)
     # =========================
-    m = market_score()
-    print("MARKET SCORE:", m)
-
-    mode = get_market_mode(m)
-    print("⚙️ MODE:", mode)
-
-    if mode == "OFF":
-        print("❌ MARKET OFF")
-        return
+    symbol_to_sector = {
+        row["symbol"]: row["sector"]
+        for _, row in df_symbols.iterrows()
+    }
 
     # =========================
     # SECTOR
@@ -86,7 +122,7 @@ def main():
         print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
 
     # =========================
-    # LEADERS RAW
+    # RAW LEADERS
     # =========================
     leaders = []
 
@@ -99,81 +135,74 @@ def main():
     print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
-    # FILTER + SCORING
+    # SCORING
     # =========================
-    df_index = load_index()
     scored = []
 
     for symbol in leaders:
+
         try:
             df = load_stock_data(symbol)
+
+            if df is None or len(df) < 30:
+                continue
+
+            df["value"] = df["close"] * df["volume"]
+            avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
+            liq_score = np.tanh(avg_value_20 / 1e9)
 
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
             inst = institutional_score(df)
-            inst_flow = institutional_flow_score(df)  # 🔥 NEW
+            inst_flow = institutional_flow_score(df)
             mf = money_flow_score(df)
-            acc = detect_accumulation(df)
             flow_acc = flow_timeline(df)
 
-            # =========================
-            # 🔥 REGIME FILTER (NỚI)
-            # =========================
-            if mode == "SAFE":
-                rs_cond = rs > -0.02
-            else:
-                rs_cond = rs > -0.10   # 🔥 nới thêm
+            sector = symbol_to_sector.get(symbol)
+            sector_row = sector_df[sector_df["sector"] == sector]
 
-            if not rs_cond:
+            if sector_row.empty:
                 continue
 
-            # =========================
-            # 🔥 SCORING (UPGRADE)
-            # =========================
-            score = (
-                rs * 2 +
-                voe * 1.5 +
-                inst * 1.5 +
-                inst_flow * 1.5 +   # 🔥 ADD
-                mf * 1.2 +
-                (1 if acc else 0)
+            sector_row = sector_row.iloc[0]
+
+            leader_score = compute_leader_score(
+                rs=rs,
+                rotation_score=sector_row["rotation_score"],
+                rs_sector=rs - sector_row.get("sector_return", 0),
+                inst=inst,
+                inst_flow=inst_flow,
+                mf=mf,
+                flow_timeline=flow_acc,
+                voe=voe
             )
 
-            # 🔥 FLOW TIMELINE
-            score += flow_acc * 1.2
+            leader_score *= (0.7 + 0.6 * liq_score)
 
-            # 🔥 MOMENTUM BOOST
-            if rs > 0:
-                score *= 1.1
-
-            # 🔥 MONEY FLOW BOOST
-            if mf > 1:
-                score *= 1.1
-
-            # 🔥 STRONG INSTITUTION BONUS
-            if inst_flow > 1:
-                score *= 1.1
-
-            scored.append((symbol, score))
+            scored.append((symbol, leader_score))
 
         except Exception as e:
-            print(symbol, "FILTER ERROR:", str(e))
+            print(symbol, "SCORING ERROR:", str(e))
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    # =========================
-    # LEADER SELECT
-    # =========================
     if not scored:
-        print("⚠️ NO STRONG LEADER → fallback")
-        leaders = leaders[:12]
-    else:
-        if mode == "SAFE":
-            leaders = [s[0] for s in scored[:10]]
-        else:
-            leaders = [s[0] for s in scored[:15]]
+        print("⚠️ NO DATA")
+        return
+
+    leaders = [s[0] for s in scored[:12]]
 
     print("\n🔥 STRONG LEADERS:", leaders)
+
+    # =========================
+    # PRELOAD DATA (🔥 FIX CLEAN)
+    # =========================
+    data_map = {}
+
+    for s in leaders:
+        df = load_stock_data(s)
+        if df is not None and len(df) >= 30:
+            data_map[s] = df
 
     # =========================
     # ENTRY
@@ -181,104 +210,118 @@ def main():
     print("\nSCAN ENTRY...\n")
 
     signals = []
+    equity = 100000
+    peak_equity = equity
 
     for symbol in leaders:
 
         try:
-            df = load_stock_data(symbol)
-            price = df["close"].iloc[-1]
+            df = data_map.get(symbol)
 
-            ok, f = validate_entry(df, symbol)
-
-            print(f"{symbol} | price={round(price,2)} | type={f['type'] if f else None}")
-
-            if not ok:
-                print("   ❌ skip")
+            if df is None:
                 continue
 
-            # =========================
-            # 🔥 MTF CONFIRM (KHÔNG GIẾT TÍN HIỆU)
-            # =========================
+            ok, f = validate_entry(df, symbol, regime=mode)
+
+            if not ok or f is None:
+                continue
+
+            # MTF
             try:
                 df_h1 = load_stock_data_h1(symbol)
+                mtf_score = mtf_confirm(df, df_h1) if df_h1 is not None else 0
             except:
-                df_h1 = None
+                mtf_score = 0
 
-            if f["type"] in ["EARLY", "PRE"]:
-                if df_h1 is not None:
-                    if not mtf_confirm(df, df_h1):
-                        print("   ❌ MTF FAIL")
-                        continue
-                else:
-                    print("   ⚠️ NO H1 → PASS")  # 🔥 FIX
+            risk = f["entry"] - f["sl"]
+            reward = f["tp1"] - f["entry"]
 
-            # =========================
-            # 🔥 AGGRESSIVE FILTER (NỚI)
-            # =========================
-            if mode == "AGGRESSIVE":
-                if abs(price - f["entry"]) / f["entry"] > 0.10:  # 🔥 nới 0.08 → 0.10
-                    print("   ❌ too far")
-                    continue
+            if risk <= 0:
+                continue
 
-            rr = (f["tp1"] - f["entry"]) / (f["entry"] - f["sl"])
+            rr = min(reward / risk, 5)
 
-            score = rr
+            system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            # =========================
-            # 🔥 TYPE BOOST (RE-ORDER)
-            # =========================
-            if f["type"] == "EARLY_BREAKOUT":
-                score *= 1.8
-            elif f["type"] == "PRE":
-                score *= 1.6   # 🔥 tăng
-            elif f["type"] == "EARLY":
-                score *= 1.3
-            elif f["type"] == "STRONG":
-                score *= 1.0
-            elif f["type"] == "PULLBACK":
-                score *= 1.1
+            final_score = rr * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
 
-            # 🔥 REGIME BOOST
-            if mode == "AGGRESSIVE":
-                score *= 1.2
+            sector = symbol_to_sector.get(symbol, "UNKNOWN")
 
-            signals.append({
+            signal = {
                 "symbol": symbol,
+                "sector": sector,   # 🔥 FIX
                 "entry": f["entry"],
                 "sl": f["sl"],
                 "tp1": f["tp1"],
                 "tp2": f["tp2"],
                 "rr": rr,
                 "type": f["type"],
-                "score": score
+                "score": final_score,
+                "mtf_score": round(mtf_score, 2)
+            }
+
+      
+            # =========================
+            # 🔥 META FILTER
+            # =========================
+            
+            #ok_meta, meta_score = meta_filter(signal, mode)
+            
+            ok_meta, meta_score, wr, conf = meta_filter_v2(signal)
+            
+            if not ok_meta:
+                continue
+            
+            signal["meta_score"] = round(meta_score, 3)
+            signal["meta_wr"] = round(wr, 2)
+            signal["meta_conf"] = round(conf, 2)
+            
+            # 🔥 FIX: đúng signature
+            size = position_size(
+                equity=equity,
+                signal=signal,
+                regime=mode,
+                peak_equity=peak_equity
+            )
+
+            risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
+
+            signal.update({
+                "size": round(size, 2),
+                "risk_pct": round(risk_pct, 4)
             })
+
+            signals.append(signal)
 
             log_trade(symbol, f["entry"], f["sl"], f["tp1"])
 
-            print("   ✅ SIGNAL")
+            print(f"{symbol} ✅ score={round(final_score,2)} size={round(size,2)}")
 
         except Exception as e:
             print(symbol, "ERROR:", str(e))
 
+    # =========================
+    # PORTFOLIO OPT
+    # =========================
     signals = sorted(signals, key=lambda x: x["score"], reverse=True)
+    signals = optimize_portfolio(signals, data_map, equity)
 
     print("\nTOTAL SIGNAL:", len(signals))
 
-    # =========================
-    # TELEGRAM
-    # =========================
     if signals:
 
-        msg = "🔥 SMART MONEY SIGNALS\n\n"
+        msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
 
-        for s in signals:
+        for s in signals[:10]:
             msg += (
                 f"{s['symbol']} ({s['type']})\n"
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
-                f"TP2: {round(s['tp2'],2)}\n"
-                f"RR: {round(s['rr'],2)}\n\n"
+                f"RR: {round(s['rr'],2)}\n"
+                f"MTF: {s['mtf_score']}\n"
+                f"Size: {s['size']}\n"
+                f"Risk: {s['risk_pct']*100:.2f}%\n\n"
             )
 
         send_telegram(msg)
