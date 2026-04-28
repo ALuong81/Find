@@ -18,9 +18,7 @@ from tracker import log_trade
 
 from leader_score import compute_leader_score
 from risk_engine import position_size
-from meta_filter import meta_filter
 from meta_filter_v2 import meta_filter_v2
-
 
 import os
 import requests
@@ -102,7 +100,7 @@ def main():
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
     # =========================
-    # BUILD SYMBOL → SECTOR MAP (🔥 FIX)
+    # SYMBOL → SECTOR MAP
     # =========================
     symbol_to_sector = {
         row["symbol"]: row["sector"]
@@ -117,10 +115,6 @@ def main():
 
     top_sectors = sector_df.head(3)
 
-    print("\n🔥 TOP SECTORS:")
-    for _, row in top_sectors.iterrows():
-        print(f"{row['sector']} | score={round(row['rotation_score'],2)}")
-
     # =========================
     # RAW LEADERS
     # =========================
@@ -128,11 +122,9 @@ def main():
 
     for _, row in top_sectors.iterrows():
         stocks = pick_leaders(df_symbols, row["sector"])
-        for _, s in stocks.iterrows():
-            leaders.append(s["symbol"])
+        leaders += stocks["symbol"].tolist()
 
     leaders = list(set(leaders))
-    print("\n🔥 RAW LEADERS:", leaders)
 
     # =========================
     # SCORING
@@ -148,8 +140,7 @@ def main():
                 continue
 
             df["value"] = df["close"] * df["volume"]
-            avg_value_20 = df["value"].rolling(20).mean().iloc[-1]
-            liq_score = np.tanh(avg_value_20 / 1e9)
+            liq_score = np.tanh(df["value"].rolling(20).mean().iloc[-1] / 1e9)
 
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
@@ -186,29 +177,20 @@ def main():
 
     scored = sorted(scored, key=lambda x: x[1], reverse=True)
 
-    if not scored:
-        print("⚠️ NO DATA")
-        return
-
     leaders = [s[0] for s in scored[:12]]
 
-    print("\n🔥 STRONG LEADERS:", leaders)
-
     # =========================
-    # PRELOAD DATA (🔥 FIX CLEAN)
+    # PRELOAD
     # =========================
-    data_map = {}
-
-    for s in leaders:
-        df = load_stock_data(s)
-        if df is not None and len(df) >= 30:
-            data_map[s] = df
+    data_map = {
+        s: load_stock_data(s)
+        for s in leaders
+        if load_stock_data(s) is not None
+    }
 
     # =========================
     # ENTRY
     # =========================
-    print("\nSCAN ENTRY...\n")
-
     signals = []
     equity = 100000
     peak_equity = equity
@@ -217,13 +199,23 @@ def main():
 
         try:
             df = data_map.get(symbol)
-
             if df is None:
                 continue
 
             ok, f = validate_entry(df, symbol, regime=mode)
+            if not ok:
+                continue
 
-            if not ok or f is None:
+            risk = f["entry"] - f["sl"]
+            reward = f["tp1"] - f["entry"]
+
+            if risk <= 0:
+                continue
+
+            rr = reward / risk
+
+            # 🔥 FILTER RR
+            if rr < 1.0:
                 continue
 
             # MTF
@@ -233,14 +225,6 @@ def main():
             except:
                 mtf_score = 0
 
-            risk = f["entry"] - f["sl"]
-            reward = f["tp1"] - f["entry"]
-
-            if risk <= 0:
-                continue
-
-            rr = min(reward / risk, 5)
-
             system_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
             final_score = rr * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
@@ -249,7 +233,7 @@ def main():
 
             signal = {
                 "symbol": symbol,
-                "sector": sector,   # 🔥 FIX
+                "sector": sector,
                 "entry": f["entry"],
                 "sl": f["sl"],
                 "tp1": f["tp1"],
@@ -260,35 +244,38 @@ def main():
                 "mtf_score": round(mtf_score, 2)
             }
 
-      
             # =========================
-            # 🔥 META FILTER
+            # 🔥 META FILTER V2
             # =========================
-            
-            #ok_meta, meta_score = meta_filter(signal, mode)
-            
             ok_meta, meta_score, wr, conf = meta_filter_v2(signal)
-            
+
             if not ok_meta:
                 continue
-            
-            signal["meta_score"] = round(meta_score, 3)
-            signal["meta_wr"] = round(wr, 2)
-            signal["meta_conf"] = round(conf, 2)
-            
-            # 🔥 FIX: đúng signature
+
+            # 🔥 SCALE SIZE theo meta
+            meta_scale = np.clip(meta_score, 0.5, 1.5)
+
+            # =========================
+            # 🔥 POSITION SIZE (FIXED)
+            # =========================
             size = position_size(
                 equity=equity,
                 signal=signal,
                 regime=mode,
+                df=df,
                 peak_equity=peak_equity
             )
+
+            size *= meta_scale
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
 
             signal.update({
                 "size": round(size, 2),
-                "risk_pct": round(risk_pct, 4)
+                "risk_pct": round(risk_pct, 4),
+                "meta_score": round(meta_score, 3),
+                "meta_wr": round(wr, 2),
+                "meta_conf": round(conf, 2)
             })
 
             signals.append(signal)
@@ -319,7 +306,7 @@ def main():
                 f"SL: {round(s['sl'],2)}\n"
                 f"TP1: {round(s['tp1'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n"
-                f"MTF: {s['mtf_score']}\n"
+                f"Meta: {s['meta_score']}\n"
                 f"Size: {s['size']}\n"
                 f"Risk: {s['risk_pct']*100:.2f}%\n\n"
             )
