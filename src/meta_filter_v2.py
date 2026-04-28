@@ -6,7 +6,7 @@ from collections import defaultdict
 # =========================
 # CONFIG
 # =========================
-BASE_THRESHOLD = 0.55
+BASE_THRESHOLD = 0.48
 MIN_SAMPLES = 5
 DECAY = 0.97
 
@@ -18,7 +18,10 @@ META_FILE = "meta_stats.json"
 # =========================
 stats = defaultdict(lambda: {"win": 0.0, "loss": 0.0})
 
-
+def is_cold_start():
+    total = sum(v["win"] + v["loss"] for v in stats.values())
+    return total < 30
+    
 # =========================
 # LOAD / SAVE (SAFE)
 # =========================
@@ -172,6 +175,7 @@ def get_threshold(regime):
 # =========================
 # FILTER
 # =========================
+
 def meta_filter_v2(signal):
 
     ensure_meta_loaded()
@@ -179,9 +183,17 @@ def meta_filter_v2(signal):
     regime = signal.get("regime", "NEUTRAL")
 
     score, wr, conf = compute_meta_score(signal)
+
     th = get_threshold(regime)
 
+    # 🔥 BYPASS nếu chưa có data
+
+    if is_cold_start():
+
+        return True, score, wr, conf
+
     if score < th:
+
         return False, score, wr, conf
 
     return True, score, wr, conf
