@@ -125,7 +125,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST V4
+# BACKTEST V4 (FIXED)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -268,7 +268,7 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             # =========================
-            # 🔥 META FILTER V4
+            # META FILTER
             # =========================
             signal = {
                 "type": f.get("type", "UNKNOWN"),
@@ -295,7 +295,7 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # 🔥 DRAW DOWN
+            # DRAW DOWN
             # =========================
             if peak_equity <= 0:
                 dd_scale = 1
@@ -312,23 +312,18 @@ def run_backtest(start_date="2023-01-01"):
                     dd_scale = 0.3
 
             # =========================
-            # 🔥 AI SCALE (NEW)
+            # AI SCALE
             # =========================
             ai_scale = 0.7 + prob
-
             risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
-            # =========================
             # APPLY RESULT
-            # =========================
             if result == 1:
                 equity += risk_amount * rr
             elif result == -1:
                 equity -= risk_amount
 
-            # =========================
-            # 🔥 LEARNING (CRITICAL)
-            # =========================
+            # 🔥 LEARNING
             update_model(signal, result, equity, peak_equity)
 
             history.append({
@@ -344,7 +339,10 @@ def run_backtest(start_date="2023-01-01"):
             })
 
             trades_today += 1
-            # sau khi backtest xong
-            save_meta()
+
+    # =========================
+    # 🔥 SAVE META (CHUẨN)
+    # =========================
+    save_meta()
 
     return pd.DataFrame(history)
