@@ -167,10 +167,10 @@ def run_backtest(start_date="2023-01-01"):
 
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.025
-            score_threshold = -0.5
+            score_threshold = -0.7
         else:
             base_risk_pct = 0.015
-            score_threshold = -0.2
+            score_threshold = -0.3
 
         # =========================
         # SECTOR
@@ -264,7 +264,7 @@ def run_backtest(start_date="2023-01-01"):
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            if rr < 1.0:
+            if rr < 0.8:
                 continue
 
             # =========================
@@ -279,7 +279,7 @@ def run_backtest(start_date="2023-01-01"):
 
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
-            if not ok_meta:
+            if not ok_meta and prob < 0.52:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
