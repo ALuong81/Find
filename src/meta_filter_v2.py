@@ -31,8 +31,15 @@ def load_meta():
 
     if not os.path.exists(META_FILE):
         print("⚠️ META FILE NOT FOUND → INIT NEW")
+        # 🔥 FIX: tạo file ngay
+        try:
+            with open(META_FILE, "w") as f:
+                json.dump({}, f)
+                print("⚠️ CREATE NEW META FILE")
+            except:
+                pass
         return
-
+    
     try:
         with open(META_FILE, "r") as f:
             data = json.load(f)
