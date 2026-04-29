@@ -218,7 +218,7 @@ def main():
             rr = reward / risk
 
             # 🔥 FIX: nới RR (để có signal học)
-            if rr < 0.6:
+            if rr < 0.7 and mode != "AGGRESSIVE":
                 continue
 
             # =========================
