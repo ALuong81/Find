@@ -261,8 +261,10 @@ def run_backtest(start_date="2023-01-01"):
 
             ok, f = validate_entry(df, symbol, regime=mode)
 
+            # 🔥 FIX: soft entry khi cold start / defensive
             if not ok:
-                continue
+                if mode != "AGGRESSIVE":
+                    continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
