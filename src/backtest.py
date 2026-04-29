@@ -14,10 +14,8 @@ from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
-# 🔥 NEW ENTRY
 from entry_engine import entry_score
 
-# 🔥 META
 from meta_filter_v4 import meta_filter_v4
 from meta_filter_v3_5 import update_model
 from meta_filter_v2 import save_meta
@@ -122,7 +120,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (NEW ENGINE)
+# BACKTEST (V4.1 FIXED)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -165,15 +163,15 @@ def run_backtest(start_date="2023-01-01"):
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.025
             max_trades = 3
-            entry_th = 0.5
+            entry_th = 1.5
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
-            entry_th = 0.8
+            entry_th = 2.0
         else:
             base_risk_pct = 0.01
             max_trades = 1
-            entry_th = 1.0
+            entry_th = 2.5
 
         # =========================
         # SECTOR FILTER
@@ -195,7 +193,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # SCORING (RANK)
+        # SCORING
         # =========================
         scored = []
 
@@ -243,7 +241,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = scored[:10]
 
         # =========================
-        # ENTRY (SCORING)
+        # ENTRY
         # =========================
         trades_today = 0
 
@@ -259,21 +257,19 @@ def run_backtest(start_date="2023-01-01"):
 
             if f is None:
                 continue
-                
 
             score_entry = f["score"]
 
-            if score_entry < 2.5 or score_entry < entry_th:
+            # ✅ FIX: dùng 1 ngưỡng duy nhất
+            if score_entry < entry_th:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            if rr < 0:
+            # ✅ FIX: lọc RR chuẩn
+            if rr < 1.2:
                 continue
 
-            # =========================
-            # META SIGNAL (FULL FEATURE)
-            # =========================
             signal = {
                 "symbol": symbol,
                 "type": f.get("type", "UNKNOWN"),
@@ -281,14 +277,13 @@ def run_backtest(start_date="2023-01-01"):
                 "mtf_score": score_entry,
                 "regime": mode,
                 "score": score_entry,
-                "volatility": f.get("volatility", 0.2),
-                "liquidity": f.get("liquidity", 1),
                 "correlation": rs
             }
 
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
-            if not ok_meta:
+            # ✅ FIX: soft filter meta
+            if not ok_meta and prob < 0.45:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -304,7 +299,7 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # DD SCALE
+            # RISK CONTROL
             # =========================
             dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
 
