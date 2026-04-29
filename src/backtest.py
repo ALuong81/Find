@@ -7,7 +7,6 @@ from symbol_loader import load_symbols
 from smart_money import sector_money_flow, pick_leaders
 from sector_rotation import sector_rotation
 from relative_strength import relative_strength
-from entry import validate_entry
 from voe import voe_score
 from accumulation import detect_accumulation
 from institutional import institutional_score
@@ -15,7 +14,10 @@ from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
-# 🔥 V4
+# 🔥 NEW ENTRY
+from entry_engine import entry_score
+
+# 🔥 META
 from meta_filter_v4 import meta_filter_v4
 from meta_filter_v3_5 import update_model
 from meta_filter_v2 import save_meta
@@ -23,7 +25,6 @@ from meta_filter_v2 import save_meta
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
-MAX_TRADES_PER_DAY = 2
 
 
 # =========================
@@ -72,12 +73,8 @@ def simulate_trade(df, entry, sl, tp):
         if o >= tp:
             return 1
 
-        if l <= sl and h >= tp:
-            return -1
-
         if l <= sl:
             return -1
-
         if h >= tp:
             return 1
 
@@ -125,7 +122,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST V4 (FIXED)
+# BACKTEST (NEW ENGINE)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -162,20 +159,24 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, _ = market_regime(df_index)
 
-        if mode == "DEFENSIVE":
-            MAX_TRADES_PER_DAY = 1
-        else:
-            MAX_TRADES_PER_DAY = 2
-
+        # =========================
+        # CONFIG
+        # =========================
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.025
-            score_threshold = -0.7
-        else:
+            max_trades = 3
+            entry_th = 0.5
+        elif mode == "NEUTRAL":
             base_risk_pct = 0.015
-            score_threshold = -0.3
+            max_trades = 2
+            entry_th = 0.8
+        else:
+            base_risk_pct = 0.01
+            max_trades = 1
+            entry_th = 1.0
 
         # =========================
-        # SECTOR
+        # SECTOR FILTER
         # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
@@ -194,7 +195,7 @@ def run_backtest(start_date="2023-01-01"):
         leaders = list(set(leaders))
 
         # =========================
-        # SCORING
+        # SCORING (RANK)
         # =========================
         scored = []
 
@@ -230,41 +231,39 @@ def run_backtest(start_date="2023-01-01"):
 
                 score *= (1 + np.tanh(score))
 
-                if score > score_threshold:
-                    scored.append((symbol, score))
+                scored.append((symbol, score, rs))
 
             except:
                 continue
 
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)
-
         if not scored:
             continue
 
-        leaders = [s[0] for s in scored[:5]]
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)
+        leaders = scored[:10]
 
         # =========================
-        # ENTRY
+        # ENTRY (SCORING)
         # =========================
         trades_today = 0
 
-        for symbol in leaders:
+        for symbol, _, rs in leaders:
 
-            if trades_today >= MAX_TRADES_PER_DAY:
+            if trades_today >= max_trades:
                 break
-
-            if symbol not in data_map:
-                continue
 
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            ok, f = validate_entry(df, symbol, regime=mode)
+            f = entry_score(df)
 
-            # 🔥 FIX: soft entry khi cold start / defensive
-            if not ok:
-                if mode != "AGGRESSIVE":
-                    continue
+            if f is None:
+                continue
+
+            score_entry = f["score"]
+
+            if score_entry < entry_th:
+                continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
@@ -272,20 +271,24 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             # =========================
-            # META FILTER
+            # META SIGNAL (FULL FEATURE)
             # =========================
             signal = {
+                "symbol": symbol,
                 "type": f.get("type", "UNKNOWN"),
                 "rr": rr,
-                "mtf_score": 0,
-                "regime": mode
+                "mtf_score": score_entry,
+                "regime": mode,
+                "score": score_entry,
+                "volatility": f.get("volatility", 0.2),
+                "liquidity": f.get("liquidity", 1),
+                "correlation": rs
             }
 
             ok_meta, prob, p2, p3 = meta_filter_v4(signal)
 
             if not ok_meta:
-                if prob < 0.45:
-                    continue
+                continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
 
@@ -300,35 +303,29 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # DRAW DOWN
+            # DD SCALE
             # =========================
-            if peak_equity <= 0:
-                dd_scale = 1
+            dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
+
+            if dd < 0.05:
+                dd_scale = 1.0
+            elif dd < 0.1:
+                dd_scale = 0.7
+            elif dd < 0.15:
+                dd_scale = 0.5
             else:
-                dd = (peak_equity - equity) / peak_equity
+                dd_scale = 0.3
 
-                if dd < 0.05:
-                    dd_scale = 1.0
-                elif dd < 0.1:
-                    dd_scale = 0.7
-                elif dd < 0.15:
-                    dd_scale = 0.5
-                else:
-                    dd_scale = 0.3
-
-            # =========================
-            # AI SCALE
-            # =========================
             ai_scale = 0.7 + prob
             risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
-            # APPLY RESULT
+            # APPLY
             if result == 1:
                 equity += risk_amount * rr
             elif result == -1:
                 equity -= risk_amount
 
-            # 🔥 LEARNING
+            # LEARN
             update_model(signal, result, equity, peak_equity)
 
             history.append({
@@ -345,9 +342,6 @@ def run_backtest(start_date="2023-01-01"):
 
             trades_today += 1
 
-    # =========================
-    # 🔥 SAVE META (CHUẨN)
-    # =========================
     save_meta()
 
     return pd.DataFrame(history)
