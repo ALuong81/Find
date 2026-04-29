@@ -115,9 +115,12 @@ def meta_filter_v4(signal):
     # =========================
     # DISAGREEMENT CONTROL
     # =========================
-    penalty = disagreement_penalty(prob2, prob3)
-    prob *= penalty
 
+    # 🔥 FIX
+    if conf >= 0.4:
+        penalty = disagreement_penalty(prob2, prob3)
+        prob *= penalty
+        
     # =========================
     # THRESHOLD
     # =========================
@@ -132,11 +135,8 @@ def meta_filter_v4(signal):
     # LOW CONF → SOFT MODE
     # =========================
     if conf < 0.35:
-        if prob > (th - 0.05):
-            return True, prob, prob2, prob3
-        else:
-            return False, prob, prob2, prob3
-
+        return True, prob, prob2, prob3
+    
     # =========================
     # NORMAL DECISION
     # =========================
