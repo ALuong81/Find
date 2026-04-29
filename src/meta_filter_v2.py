@@ -36,8 +36,8 @@ def load_meta():
             with open(META_FILE, "w") as f:
                 json.dump({}, f)
                 print("⚠️ CREATE NEW META FILE")
-            except:
-                pass
+        except:
+            pass
         return
     
     try:
