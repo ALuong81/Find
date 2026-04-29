@@ -50,9 +50,9 @@ def disagreement_penalty(p1, p2):
     elif diff < 0.2:
         return 0.85
     elif diff < 0.3:
-        return 0.7
+        return 0.8
     else:
-        return 0.5
+        return 0.6
 
 
 # =========================
@@ -132,7 +132,7 @@ def meta_filter_v4(signal):
     # LOW CONF → SOFT MODE
     # =========================
     if conf < 0.35:
-        if prob > (th - 0.03):
+        if prob > (th - 0.05):
             return True, prob, prob2, prob3
         else:
             return False, prob, prob2, prob3
