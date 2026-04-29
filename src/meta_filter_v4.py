@@ -67,7 +67,7 @@ def get_threshold(signal):
     if regime == "AGGRESSIVE":
         th -= 0.07
     elif regime == "DEFENSIVE":
-        th -= 0.02
+        th -= 0.08
 
     return th
 
