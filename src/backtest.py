@@ -259,15 +259,16 @@ def run_backtest(start_date="2023-01-01"):
 
             if f is None:
                 continue
+                
 
             score_entry = f["score"]
 
-            if score_entry < entry_th:
+            if score_entry < 2.5 or score_entry < entry_th:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            if rr < 0.8:
+            if rr < 0:
                 continue
 
             # =========================
