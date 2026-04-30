@@ -16,22 +16,12 @@ from flow_timeline import flow_timeline
 
 from entry_engine import entry_score
 
-from meta_filter_v6 import meta_filter_v6
-from meta_filter_v3_5 import update_model
+from meta_filter_v6 import meta_filter_v6, update_meta_v6
 from meta_filter_v2 import save_meta
 
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 10
-
-
-# =========================
-# PERFORMANCE TRACKING
-# =========================
-perf = {
-    "v2_win": 0.5,
-    "v3_win": 0.5
-}
 
 
 # =========================
@@ -50,13 +40,7 @@ def market_regime(df_index):
 
     trend = 1 if ma20 > ma50 else -1
 
-    score = (
-        ret_5 * 2 +
-        ret_20 * 1.5 -
-        vol * 2 +
-        trend
-    )
-
+    score = ret_5 * 2 + ret_20 * 1.5 - vol * 2 + trend
     score = np.tanh(score * 3)
 
     if score > 0.3:
@@ -65,6 +49,33 @@ def market_regime(df_index):
         return "NEUTRAL", score
     else:
         return "DEFENSIVE", score
+
+
+# =========================
+# ATR
+# =========================
+def compute_atr(df, period=14):
+    tr = np.maximum(
+        df["high"] - df["low"],
+        np.maximum(
+            abs(df["high"] - df["close"].shift()),
+            abs(df["low"] - df["close"].shift())
+        )
+    )
+    return tr.rolling(period).mean().iloc[-1]
+
+
+# =========================
+# DYNAMIC TP
+# =========================
+def dynamic_tp(entry, atr, regime):
+
+    if regime == "AGGRESSIVE":
+        return entry + atr * 3
+    elif regime == "NEUTRAL":
+        return entry + atr * 2
+    else:
+        return entry + atr * 1.2
 
 
 # =========================
@@ -78,14 +89,9 @@ def simulate_trade(df, entry, sl, tp):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        if o <= sl:
+        if o <= sl or l <= sl:
             return -1
-        if o >= tp:
-            return 1
-
-        if l <= sl:
-            return -1
-        if h >= tp:
+        if o >= tp or h >= tp:
             return 1
 
     return 0
@@ -118,21 +124,7 @@ def preload_all(symbols):
 
 
 # =========================
-# RR
-# =========================
-def calc_rr(entry, sl, tp):
-
-    risk = entry - sl
-    reward = tp - entry
-
-    if risk <= 0:
-        return 0
-
-    return reward / risk
-
-
-# =========================
-# BACKTEST (V5 STABLE)
+# BACKTEST V6 FINAL
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -142,18 +134,17 @@ def run_backtest(start_date="2023-01-01"):
     df_index_full = load_index()
 
     df_index_full["date"] = pd.to_datetime(df_index_full["date"], errors="coerce")
-    df_index_full = df_index_full.dropna(subset=["date"])
     df_index_full = df_index_full.sort_values("date")
 
     equity = INITIAL_CAPITAL
     peak_equity = equity
 
     history = []
+    last_trade = {}
 
     unique_dates = sorted(df_index_full["date"].unique())
 
-    symbols_all = df_symbols["symbol"].tolist()
-    data_map = preload_all(symbols_all)
+    data_map = preload_all(df_symbols["symbol"].tolist())
 
     for date in unique_dates:
 
@@ -167,43 +158,34 @@ def run_backtest(start_date="2023-01-01"):
         if len(df_index) < 50:
             continue
 
-        mode, _ = market_regime(df_index)
+        mode, m_score = market_regime(df_index)
+
+        # 🔥 NO TRADE ZONE
+        if abs(m_score) < 0.1:
+            continue
 
         # =========================
-        # CONFIG (balanced)
+        # CONFIG
         # =========================
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
-            entry_th = 1.5
-            rr_min = 1.2
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
-            entry_th = 1.8
-            rr_min = 1.3
         else:
             base_risk_pct = 0.01
             max_trades = 1
-            entry_th = 2.2
-            rr_min = 1.4
 
         # =========================
         # SECTOR
         # =========================
-        try:
-            sector_df = sector_money_flow(df_symbols)
-            sector_df = sector_rotation(sector_df)
-        except:
-            continue
-
-        top_sectors = sector_df.head(3)
+        sector_df = sector_money_flow(df_symbols)
+        sector_df = sector_rotation(sector_df)
 
         leaders = []
-
-        for _, row in top_sectors.iterrows():
-            stocks = pick_leaders(df_symbols, row["sector"])
-            leaders += stocks["symbol"].tolist()
+        for _, row in sector_df.head(3).iterrows():
+            leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
 
@@ -233,34 +215,29 @@ def run_backtest(start_date="2023-01-01"):
                 acc = detect_accumulation(df)
 
                 score = (
-                    rs * 2 +
-                    voe * 1.5 +
-                    inst * 1.2 +
-                    inst_flow * 1.8 +
-                    mf * 1.3 +
-                    flow_acc * 1.2 +
-                    (1 if acc else 0)
+                    rs * 2 + voe * 1.5 + inst * 1.2 +
+                    inst_flow * 1.8 + mf * 1.3 +
+                    flow_acc * 1.2 + (1 if acc else 0)
                 )
-
-                score *= (1 + np.tanh(score))
 
                 scored.append((symbol, score, rs))
 
             except:
                 continue
 
-        if not scored:
-            continue
-
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)
-        leaders = scored[:12]
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:10]
 
         trades_today = 0
 
-        for symbol, _, rs in leaders:
+        for symbol, _, rs in scored:
 
             if trades_today >= max_trades:
                 break
+
+            # 🔥 anti spam
+            if symbol in last_trade:
+                if (date - last_trade[symbol]).days < 5:
+                    continue
 
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
@@ -269,79 +246,63 @@ def run_backtest(start_date="2023-01-01"):
             if f is None:
                 continue
 
-            score_entry = f["score"]
-
-            # 🔥 SOFT ENTRY FILTER
-            dynamic_th = entry_th * (1 - rs * 0.2)
-
-            if score_entry < dynamic_th:
+            # 🔥 adaptive entry
+            threshold = 2.0 * (1 - rs * 0.3)
+            if f["score"] < threshold:
                 continue
 
-            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
+            atr = compute_atr(df)
+            tp = dynamic_tp(f["entry"], atr, mode)
 
-            if rr < rr_min:
+            risk = f["entry"] - f["sl"]
+            reward = tp - f["entry"]
+
+            if risk <= 0:
+                continue
+
+            rr = reward / risk
+
+            if rr < 1.5:
                 continue
 
             signal = {
                 "symbol": symbol,
-                "type": f.get("type", "UNKNOWN"),
                 "rr": rr,
-                "mtf_score": score_entry,
+                "score": f["score"],
                 "regime": mode,
-                "score": score_entry,
                 "correlation": rs,
-                "perf": perf
+                "volatility": df["close"].pct_change().rolling(10).std().iloc[-1]
             }
 
-            #ok_meta, prob, p2, p3 = meta_filter_v5(signal)
             prob = meta_filter_v6(signal)
-            if prob < 0.55:
-                continue
 
-    continue
-            # 🔥 SOFT META (critical fix)
-            if prob < 0.45:
+            if prob < 0.55:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
             if future_df.empty:
                 continue
 
-            result = simulate_trade(
-                future_df,
-                f["entry"],
-                f["sl"],
-                f["tp1"]
-            )
+            result = simulate_trade(future_df, f["entry"], f["sl"], tp)
+
+            # 🔥 update meta
+            update_meta_v6(signal, result)
 
             # =========================
-            # RISK (stable)
+            # RISK
             # =========================
-            dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
+            dd = (peak_equity - equity) / peak_equity
 
-            if dd < 0.05:
-                dd_scale = 1.0
-            elif dd < 0.1:
-                dd_scale = 0.7
-            elif dd < 0.15:
-                dd_scale = 0.5
-            else:
-                dd_scale = 0.3
+            if dd > 0.25:
+                break
 
-            ai_scale = 0.8 + prob * 0.4  # bounded
-
-            risk_amount = equity * base_risk_pct * dd_scale * ai_scale
+            size_scale = max(0.3, prob - 0.2)
+            risk_amount = equity * base_risk_pct * size_scale
 
             if result == 1:
                 equity += risk_amount * rr
-
-                perf["v2_win"] = 0.95 * perf["v2_win"] + 0.05 * p2
-                perf["v3_win"] = 0.95 * perf["v3_win"] + 0.05 * p3
-
             elif result == -1:
                 equity -= risk_amount
-
-            update_model(signal, result, equity, peak_equity)
 
             history.append({
                 "date": date,
@@ -349,10 +310,10 @@ def run_backtest(start_date="2023-01-01"):
                 "result": result,
                 "equity": equity,
                 "rr": rr,
-                "regime": mode,
                 "meta_prob": prob
             })
 
+            last_trade[symbol] = date
             trades_today += 1
 
     save_meta()
