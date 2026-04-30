@@ -79,7 +79,7 @@ def entry_score(df, df_h1=None):
         # =========================
         entry = max(price, swing_high * 0.995)
         sl = entry * (1 - atr * 1.8)
-        tp1 = entry * (1 + atr * 2.2)
+        tp1 = entry * (1 + atr * 1.8)
 
         # =========================
         # SCORING (REBALANCED)
