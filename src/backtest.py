@@ -16,7 +16,7 @@ from flow_timeline import flow_timeline
 
 from entry_engine import entry_score
 
-from meta_filter_v4 import meta_filter_v4
+from meta_filter_v4 import meta_filter_v5
 from meta_filter_v3_5 import update_model
 from meta_filter_v2 import save_meta
 
@@ -280,7 +280,7 @@ def run_backtest(start_date="2023-01-01"):
                 "correlation": rs
             }
 
-            ok_meta, prob, p2, p3 = meta_filter_v4(signal)
+            ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
             # ✅ FIX: soft filter meta
             if not ok_meta and prob < 0.45:
@@ -318,6 +318,8 @@ def run_backtest(start_date="2023-01-01"):
             # APPLY
             if result == 1:
                 equity += risk_amount * rr
+                perf["v2_win"] = 0.9 * perf["v2_win"] + 0.1 * p2
+                perf["v3_win"] = 0.9 * perf["v3_win"] + 0.1 * p3
             elif result == -1:
                 equity -= risk_amount
 
