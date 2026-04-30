@@ -254,7 +254,7 @@ def run_backtest(start_date="2023-01-01"):
             df = df_full[df_full["date"] <= date]
 
             f = entry_score(df)
-            print(f)
+            print(symbol, f)
             
             if f is None:
                 continue
