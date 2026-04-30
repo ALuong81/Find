@@ -45,20 +45,23 @@ def market_regime(df_index):
     ret_20 = close.pct_change(20).iloc[-1]
     vol = close.pct_change().rolling(20).std().iloc[-1]
 
-    trend = close.rolling(20).mean().iloc[-1] - close.rolling(50).mean().iloc[-1]
+    ma20 = close.rolling(20).mean().iloc[-1]
+    ma50 = close.rolling(50).mean().iloc[-1]
+
+    trend = 1 if ma20 > ma50 else -1
 
     score = (
         ret_5 * 2 +
         ret_20 * 1.5 -
         vol * 2 +
-        (1 if trend > 0 else -1)
+        trend
     )
 
     score = np.tanh(score * 3)
 
     if score > 0.3:
         return "AGGRESSIVE", score
-    elif score > -0.2:
+    elif score > -0.3:
         return "NEUTRAL", score
     else:
         return "DEFENSIVE", score
@@ -129,7 +132,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (V5 FIXED)
+# BACKTEST (V5 STABLE)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -166,21 +169,28 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, _ = market_regime(df_index)
 
-        # CONFIG
+        # =========================
+        # CONFIG (balanced)
+        # =========================
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
             entry_th = 1.5
+            rr_min = 1.2
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
-            entry_th = 2.0
+            entry_th = 1.8
+            rr_min = 1.3
         else:
             base_risk_pct = 0.01
             max_trades = 1
-            entry_th = 2.5
+            entry_th = 2.2
+            rr_min = 1.4
 
+        # =========================
         # SECTOR
+        # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
             sector_df = sector_rotation(sector_df)
@@ -197,7 +207,9 @@ def run_backtest(start_date="2023-01-01"):
 
         leaders = list(set(leaders))
 
+        # =========================
         # SCORING
+        # =========================
         scored = []
 
         for symbol in leaders:
@@ -241,7 +253,7 @@ def run_backtest(start_date="2023-01-01"):
             continue
 
         scored = sorted(scored, key=lambda x: x[1], reverse=True)
-        leaders = scored[:10]
+        leaders = scored[:12]
 
         trades_today = 0
 
@@ -259,17 +271,15 @@ def run_backtest(start_date="2023-01-01"):
 
             score_entry = f["score"]
 
-            # 🔒 HARD FILTER
-            if score_entry < entry_th:
-                continue
+            # 🔥 SOFT ENTRY FILTER
+            dynamic_th = entry_th * (1 - rs * 0.2)
 
-            if score_entry < 2.5:
+            if score_entry < dynamic_th:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            # 🔒 RR FILTER
-            if rr < 1.6:
+            if rr < rr_min:
                 continue
 
             signal = {
@@ -285,8 +295,8 @@ def run_backtest(start_date="2023-01-01"):
 
             ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
-            # 🔒 META FILTER CỨNG
-            if prob < 0.52:
+            # 🔥 SOFT META (critical fix)
+            if not ok_meta and prob < 0.45:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -300,7 +310,9 @@ def run_backtest(start_date="2023-01-01"):
                 f["tp1"]
             )
 
-            # RISK
+            # =========================
+            # RISK (stable)
+            # =========================
             dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
 
             if dd < 0.05:
@@ -312,8 +324,7 @@ def run_backtest(start_date="2023-01-01"):
             else:
                 dd_scale = 0.3
 
-            # 🔒 FIX AI SCALE
-            ai_scale = max(0.5, prob)
+            ai_scale = 0.8 + prob * 0.4  # bounded
 
             risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
