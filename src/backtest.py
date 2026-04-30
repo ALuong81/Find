@@ -264,7 +264,7 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             # 🔥 FIX RS bias
-            threshold = 1.6 * (1 - rs * 0.25)
+            threshold = 1.2 * (1 - rs * 0.2)
             if f["score"] < threshold:
                 continue
             
@@ -299,12 +299,11 @@ def run_backtest(start_date="2023-01-01"):
             }
 
             prob = meta_filter_v6(signal)
-           
-            meta_th = 0.48 if mode == "AGGRESSIVE" else 0.52
+            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
+            
+            meta_th = 0.45 if mode == "AGGRESSIVE" else 0.52
             if prob < meta_th:
                 continue
-                
-            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
             if future_df.empty:
