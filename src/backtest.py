@@ -299,7 +299,7 @@ def run_backtest(start_date="2023-01-01"):
             prob = meta_filter_v6(signal)
             print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
             
-            if prob < 0.48:
+            if prob < 0.45:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
