@@ -82,11 +82,11 @@ def compute_atr(df, period=14):
 def dynamic_tp(entry, atr, regime):
 
     if regime == "AGGRESSIVE":
-        return entry + atr * 4
+        return entry * (1 + atr * 3)
     elif regime == "NEUTRAL":
-        return entry + atr * 3
+        return entry * (1 + atr * 2.2)
     else:
-        return entry + atr * 2
+        return entry * (1 + atr * 1.6)
 
 
 # =========================
@@ -273,8 +273,8 @@ def run_backtest(start_date="2023-01-01"):
                 continue
             
             atr = compute_atr(df)
-            # tp = dynamic_tp(f["entry"], atr, mode)
-            tp = f["tp1"]  # dùng TP từ entry engine
+            tp = dynamic_tp(f["entry"], atr, mode)
+            # tp = f["tp1"]  # dùng TP từ entry engine
             
             risk = f["entry"] - f["sl"]
             reward = tp - f["entry"]
