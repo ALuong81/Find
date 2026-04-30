@@ -254,6 +254,10 @@ def run_backtest(start_date="2023-01-01"):
             df = df_full[df_full["date"] <= date]
 
             f = entry_score(df)
+            
+            if f:
+                print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
+            
             # print(symbol, f)
             
             if f is None:
