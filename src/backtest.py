@@ -26,6 +26,15 @@ MAX_HOLD_DAYS = 10
 
 
 # =========================
+# PERFORMANCE TRACKING (🔥 V5 CORE)
+# =========================
+perf = {
+    "v2_win": 0.5,
+    "v3_win": 0.5
+}
+
+
+# =========================
 # MARKET REGIME
 # =========================
 def market_regime(df_index):
@@ -120,7 +129,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (V4.1 FIXED)
+# BACKTEST (V5 FINAL)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -174,7 +183,7 @@ def run_backtest(start_date="2023-01-01"):
             entry_th = 2.5
 
         # =========================
-        # SECTOR FILTER
+        # SECTOR
         # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
@@ -260,13 +269,12 @@ def run_backtest(start_date="2023-01-01"):
 
             score_entry = f["score"]
 
-            # ✅ FIX: dùng 1 ngưỡng duy nhất
-            if score_entry < entry_th:
+            # 🔥 adaptive entry (mềm hơn)
+            if score_entry < entry_th * (1 - rs * 0.2):
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            # ✅ FIX: lọc RR chuẩn
             if rr < 1.2:
                 continue
 
@@ -277,12 +285,12 @@ def run_backtest(start_date="2023-01-01"):
                 "mtf_score": score_entry,
                 "regime": mode,
                 "score": score_entry,
-                "correlation": rs
+                "correlation": rs,
+                "perf": perf   # 🔥 truyền feedback
             }
 
             ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
-            # ✅ FIX: soft filter meta
             if not ok_meta and prob < 0.45:
                 continue
 
@@ -299,7 +307,7 @@ def run_backtest(start_date="2023-01-01"):
             )
 
             # =========================
-            # RISK CONTROL
+            # RISK
             # =========================
             dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
 
@@ -315,15 +323,16 @@ def run_backtest(start_date="2023-01-01"):
             ai_scale = 0.7 + prob
             risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
-            # APPLY
             if result == 1:
                 equity += risk_amount * rr
-                perf["v2_win"] = 0.9 * perf["v2_win"] + 0.1 * p2
-                perf["v3_win"] = 0.9 * perf["v3_win"] + 0.1 * p3
+
+                # 🔥 adaptive learning
+                perf["v2_win"] = 0.95 * perf["v2_win"] + 0.05 * p2
+                perf["v3_win"] = 0.95 * perf["v3_win"] + 0.05 * p3
+
             elif result == -1:
                 equity -= risk_amount
 
-            # LEARN
             update_model(signal, result, equity, peak_equity)
 
             history.append({
@@ -333,9 +342,7 @@ def run_backtest(start_date="2023-01-01"):
                 "equity": equity,
                 "rr": rr,
                 "regime": mode,
-                "meta_prob": prob,
-                "meta_v2": p2,
-                "meta_v3": p3
+                "meta_prob": prob
             })
 
             trades_today += 1
