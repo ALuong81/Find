@@ -26,7 +26,7 @@ MAX_HOLD_DAYS = 10
 
 
 # =========================
-# PERFORMANCE TRACKING (🔥 V5 CORE)
+# PERFORMANCE TRACKING
 # =========================
 perf = {
     "v2_win": 0.5,
@@ -129,7 +129,7 @@ def calc_rr(entry, sl, tp):
 
 
 # =========================
-# BACKTEST (V5 FINAL)
+# BACKTEST (V5 FIXED)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -166,11 +166,9 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, _ = market_regime(df_index)
 
-        # =========================
         # CONFIG
-        # =========================
         if mode == "AGGRESSIVE":
-            base_risk_pct = 0.025
+            base_risk_pct = 0.02
             max_trades = 3
             entry_th = 1.5
         elif mode == "NEUTRAL":
@@ -182,9 +180,7 @@ def run_backtest(start_date="2023-01-01"):
             max_trades = 1
             entry_th = 2.5
 
-        # =========================
         # SECTOR
-        # =========================
         try:
             sector_df = sector_money_flow(df_symbols)
             sector_df = sector_rotation(sector_df)
@@ -201,9 +197,7 @@ def run_backtest(start_date="2023-01-01"):
 
         leaders = list(set(leaders))
 
-        # =========================
         # SCORING
-        # =========================
         scored = []
 
         for symbol in leaders:
@@ -249,9 +243,6 @@ def run_backtest(start_date="2023-01-01"):
         scored = sorted(scored, key=lambda x: x[1], reverse=True)
         leaders = scored[:10]
 
-        # =========================
-        # ENTRY
-        # =========================
         trades_today = 0
 
         for symbol, _, rs in leaders:
@@ -263,19 +254,22 @@ def run_backtest(start_date="2023-01-01"):
             df = df_full[df_full["date"] <= date]
 
             f = entry_score(df)
-
             if f is None:
                 continue
 
             score_entry = f["score"]
 
-            # 🔥 adaptive entry (mềm hơn)
-            if score_entry < entry_th * (1 - rs * 0.2):
+            # 🔒 HARD FILTER
+            if score_entry < entry_th:
+                continue
+
+            if score_entry < 2.5:
                 continue
 
             rr = calc_rr(f["entry"], f["sl"], f["tp1"])
 
-            if rr < 1.2:
+            # 🔒 RR FILTER
+            if rr < 1.6:
                 continue
 
             signal = {
@@ -286,16 +280,16 @@ def run_backtest(start_date="2023-01-01"):
                 "regime": mode,
                 "score": score_entry,
                 "correlation": rs,
-                "perf": perf   # 🔥 truyền feedback
+                "perf": perf
             }
 
             ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
-            if not ok_meta and prob < 0.45:
+            # 🔒 META FILTER CỨNG
+            if prob < 0.52:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
-
             if future_df.empty:
                 continue
 
@@ -306,9 +300,7 @@ def run_backtest(start_date="2023-01-01"):
                 f["tp1"]
             )
 
-            # =========================
             # RISK
-            # =========================
             dd = (peak_equity - equity) / peak_equity if peak_equity > 0 else 0
 
             if dd < 0.05:
@@ -320,13 +312,14 @@ def run_backtest(start_date="2023-01-01"):
             else:
                 dd_scale = 0.3
 
-            ai_scale = 0.7 + prob
+            # 🔒 FIX AI SCALE
+            ai_scale = max(0.5, prob)
+
             risk_amount = equity * base_risk_pct * dd_scale * ai_scale
 
             if result == 1:
                 equity += risk_amount * rr
 
-                # 🔥 adaptive learning
                 perf["v2_win"] = 0.95 * perf["v2_win"] + 0.05 * p2
                 perf["v3_win"] = 0.95 * perf["v3_win"] + 0.05 * p3
 
