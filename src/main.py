@@ -23,7 +23,7 @@ from tracker import log_trade
 from leader_score import compute_leader_score
 from risk_engine import position_size
 
-from meta_filter_v4 import meta_filter_v4
+from meta_filter_v5 import meta_filter_v5
 from meta_filter_v2 import load_meta, save_meta
 
 
@@ -251,7 +251,7 @@ def main():
             # =========================
             # META V4
             # =========================
-            ok_meta, prob, p2, p3 = meta_filter_v4(signal)
+            ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
             # 🔥 FIX: soft filter
             if prob < 0.48:
