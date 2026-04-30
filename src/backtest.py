@@ -315,7 +315,8 @@ def run_backtest(start_date="2023-01-01"):
 
             last_trade[symbol] = date
             trades_today += 1
-
+    
+    print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
     save_meta()
 
     return pd.DataFrame(history)
