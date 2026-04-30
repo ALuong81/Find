@@ -265,6 +265,10 @@ def run_backtest(start_date="2023-01-01"):
 
             # 🔥 FIX RS bias
             threshold = 1.2 * (1 - rs * 0.2)
+
+            print(f"{symbol} | score={f['score']:.2f} | threshold={threshold:.2f} | vol={f['volatility']:.3f}")
+            
+            
             if f["score"] < threshold:
                 continue
             
@@ -274,6 +278,7 @@ def run_backtest(start_date="2023-01-01"):
             
             risk = f["entry"] - f["sl"]
             reward = tp - f["entry"]
+            print(f"{symbol} | score={f['score']:.2f} | threshold={threshold:.2f} | risk={risk:.2f} | reward={reward:.2f} | vol={f['volatility']:.3f}")
             
             if risk <= 0:
                 continue
