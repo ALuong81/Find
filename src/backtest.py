@@ -269,7 +269,8 @@ def run_backtest(start_date="2023-01-01"):
                 continue
             
             atr = compute_atr(df)
-            tp = dynamic_tp(f["entry"], atr, mode)
+            # tp = dynamic_tp(f["entry"], atr, mode)
+            tp = f["tp1"]  # dùng TP từ entry engine
             
             risk = f["entry"] - f["sl"]
             reward = tp - f["entry"]
