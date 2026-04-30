@@ -25,6 +25,17 @@ MAX_HOLD_DAYS = 10
 
 
 # =========================
+# RR
+# =========================
+def calc_rr(entry, sl, tp):
+    risk = entry - sl
+    reward = tp - entry
+    if risk <= 0:
+        return 0
+    return reward / risk
+
+
+# =========================
 # MARKET REGIME
 # =========================
 def market_regime(df_index):
@@ -79,19 +90,23 @@ def dynamic_tp(entry, atr, regime):
 
 
 # =========================
-# SIMULATE
+# SIMULATE (FIXED)
 # =========================
 def simulate_trade(df, entry, sl, tp):
 
     for i in range(len(df)):
 
-        o = df["open"].iloc[i]
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        if o <= sl or l <= sl:
+        # ambiguous case
+        if l <= sl and h >= tp:
+            return 0
+
+        if l <= sl:
             return -1
-        if o >= tp or h >= tp:
+
+        if h >= tp:
             return 1
 
     return 0
@@ -143,7 +158,6 @@ def run_backtest(start_date="2023-01-01"):
     last_trade = {}
 
     unique_dates = sorted(df_index_full["date"].unique())
-
     data_map = preload_all(df_symbols["symbol"].tolist())
 
     for date in unique_dates:
@@ -160,13 +174,11 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        # 🔥 NO TRADE ZONE
-        if abs(m_score) < 0.1:
+        # 🔥 refined no trade
+        if mode == "NEUTRAL" and abs(m_score) < 0.05:
             continue
 
-        # =========================
         # CONFIG
-        # =========================
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
@@ -234,7 +246,6 @@ def run_backtest(start_date="2023-01-01"):
             if trades_today >= max_trades:
                 break
 
-            # 🔥 anti spam
             if symbol in last_trade:
                 if (date - last_trade[symbol]).days < 5:
                     continue
@@ -245,12 +256,9 @@ def run_backtest(start_date="2023-01-01"):
             f = entry_score(df)
             if f is None:
                 continue
-            
-            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
-            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
-           
-            # 🔥 adaptive entry
-            threshold = 2.0 * (1 - rs * 0.3)
+
+            # 🔥 FIX RS bias
+            threshold = 2.0 + rs * 0.5
             if f["score"] < threshold:
                 continue
 
@@ -264,17 +272,21 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             rr = reward / risk
-
-            if rr < 1.5:
+            if rr < 1.3:
                 continue
 
+            # =========================
+            # META INPUT FIXED
+            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
                 "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
-                "volatility": df["close"].pct_change().rolling(10).std().iloc[-1]
+                "volatility": f["volatility"],
+                "liquidity": f["liquidity"],
+                "type": f["type"]
             }
 
             prob = meta_filter_v6(signal)
@@ -288,18 +300,17 @@ def run_backtest(start_date="2023-01-01"):
 
             result = simulate_trade(future_df, f["entry"], f["sl"], tp)
 
-            # 🔥 update meta
             update_meta_v6(signal, result)
 
             # =========================
-            # RISK
+            # RISK FIXED
             # =========================
             dd = (peak_equity - equity) / peak_equity
 
             if dd > 0.25:
                 break
 
-            size_scale = max(0.3, prob - 0.2)
+            size_scale = 0.5 + prob * 0.8
             risk_amount = equity * base_risk_pct * size_scale
 
             if result == 1:
@@ -318,8 +329,7 @@ def run_backtest(start_date="2023-01-01"):
 
             last_trade[symbol] = date
             trades_today += 1
-    
-    # print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
+
     save_meta()
 
     return pd.DataFrame(history)
