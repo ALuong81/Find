@@ -264,23 +264,32 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             # 🔥 FIX RS bias
-            # threshold = 2.0 + rs * 0.5
             threshold = 1.6 * (1 - rs * 0.25)
             if f["score"] < threshold:
                 continue
-
+            
             atr = compute_atr(df)
             tp = dynamic_tp(f["entry"], atr, mode)
-
+            
             risk = f["entry"] - f["sl"]
             reward = tp - f["entry"]
-
+            
             if risk <= 0:
                 continue
-
+                
             rr = reward / risk
-            if rr < 1:
+            
+            rr_min = 1.2 if mode == "AGGRESSIVE" else 1.4
+            if rr < rr_min:
                 continue
+            
+            prob = meta_filter_v6(signal)
+            
+            meta_th = 0.48 if mode == "AGGRESSIVE" else 0.52
+            if prob < meta_th:
+                continue
+                
+            print(f"{symbol} | entry={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
 
             # =========================
             # META INPUT FIXED
