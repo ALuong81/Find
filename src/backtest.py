@@ -14,7 +14,7 @@ from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
-from entry_engine import entry_score
+from entry_engine_v6 import entry_score
 
 from meta_filter_v6 import meta_filter_v6, update_meta_v6
 from meta_filter_v2 import save_meta
