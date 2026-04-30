@@ -279,6 +279,7 @@ def run_backtest(start_date="2023-01-01"):
                 continue
                 
             rr = reward / risk
+
             
             if mode == "AGGRESSIVE":
                 rr_min = 1.1
@@ -289,7 +290,7 @@ def run_backtest(start_date="2023-01-01"):
             
             if rr < rr_min:
                 continue
-            
+            print(f"{symbol} | rr={rr:.2f} | rr_min={rr_min:.2f}")
             # =========================
             # META INPUT FIXED
             # =========================
