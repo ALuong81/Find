@@ -280,7 +280,13 @@ def run_backtest(start_date="2023-01-01"):
                 
             rr = reward / risk
             
-            rr_min = 1.2 if mode == "AGGRESSIVE" else 1.4
+            if mode == "AGGRESSIVE":
+                rr_min = 1.1
+            elif mode == "NEUTRAL":
+                rr_min = 1.2
+            else:
+                rr_min = 1.3
+            
             if rr < rr_min:
                 continue
             
@@ -300,8 +306,14 @@ def run_backtest(start_date="2023-01-01"):
 
             prob = meta_filter_v6(signal)
             print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
-            
-            meta_th = 0.45 if mode == "AGGRESSIVE" else 0.52
+
+            if mode == "AGGRESSIVE":
+                meta_th = 0.4
+            elif mode == "NEUTRAL":
+                meta_th = 0.45
+            else:
+                meta_th = 0.52
+                
             if prob < meta_th:
                 continue
 
