@@ -245,7 +245,10 @@ def run_backtest(start_date="2023-01-01"):
             f = entry_score(df)
             if f is None:
                 continue
-
+            
+            rr = calc_rr(f["entry"], f["sl"], f["tp1"])
+            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
+           
             # 🔥 adaptive entry
             threshold = 2.0 * (1 - rs * 0.3)
             if f["score"] < threshold:
@@ -316,7 +319,7 @@ def run_backtest(start_date="2023-01-01"):
             last_trade[symbol] = date
             trades_today += 1
     
-    print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
+    # print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f}")
     save_meta()
 
     return pd.DataFrame(history)
