@@ -20,7 +20,6 @@ def compute_atr(df, period=14):
     atr = tr.rolling(period).mean().iloc[-1]
 
     if np.isnan(atr) or atr <= 0:
-        # fallback nhỏ nhưng không méo RR
         atr = (high - low).rolling(20).mean().iloc[-1]
         if np.isnan(atr) or atr <= 0:
             atr = close.iloc[-1] * 0.02
@@ -42,7 +41,7 @@ def compute_rsi(close, period=14):
 
 
 # =========================
-# ENTRY SCORE ENGINE (V6.1)
+# ENTRY SCORE ENGINE (V6.2)
 # =========================
 def entry_score(df, df_h1=None):
 
@@ -82,7 +81,7 @@ def entry_score(df, df_h1=None):
         tp1 = entry * (1 + atr * 1.8)
 
         # =========================
-        # SCORING (REBALANCED)
+        # SCORING
         # =========================
         score = 0.0
 
@@ -118,6 +117,17 @@ def entry_score(df, df_h1=None):
         elif pos > 0.55:
             score += 0.4
 
+        # =========================
+        # 🔥 FOLLOW THROUGH (NEW)
+        # =========================
+        recent_high = high.tail(5).max()
+        break_strength = (price - recent_high) / (recent_high + 1e-6)
+
+        if break_strength > 0:
+            score += min(break_strength * 50, 1.5)
+        else:
+            score -= 1.0
+
         # -------------------------
         # MOMENTUM (CLIPPED)
         # -------------------------
@@ -125,8 +135,6 @@ def entry_score(df, df_h1=None):
         ret_5 = close.pct_change(5).iloc[-1]
 
         momentum = (ret_3 + ret_5)
-
-        # 🔥 clamp tránh kéo âm quá mạnh
         momentum = max(-0.05, min(momentum, 0.1))
 
         score += momentum * 5
@@ -150,7 +158,7 @@ def entry_score(df, df_h1=None):
                     score += 0.3
 
         # -------------------------
-        # FLOOR (QUAN TRỌNG)
+        # FLOOR
         # -------------------------
         score = max(score, 0.3)
 
