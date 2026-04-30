@@ -38,19 +38,17 @@ def send_telegram(msg):
         print("⚠️ TELEGRAM NOT CONFIG")
         return
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-
     try:
-        requests.post(url, data={
-            "chat_id": chat_id,
-            "text": msg
-        })
+        requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data={"chat_id": chat_id, "text": msg}
+        )
     except Exception as e:
         print("❌ TELEGRAM ERROR:", str(e))
 
 
 # =========================
-# MARKET REGIME
+# MARKET REGIME (V5)
 # =========================
 def market_regime(df_index):
 
@@ -75,9 +73,9 @@ def market_regime(df_index):
 
         score = np.tanh(score * 3)
 
-        if score > 0.3:
+        if score > 0.35:
             return "AGGRESSIVE", score
-        elif score > -0.3:
+        elif score > -0.25:
             return "NEUTRAL", score
         else:
             return "DEFENSIVE", score
@@ -91,7 +89,7 @@ def market_regime(df_index):
 # =========================
 def main():
 
-    print("🚀 START BOT V4")
+    print("🚀 START BOT V5")
 
     load_meta()
 
@@ -101,17 +99,13 @@ def main():
     mode, m_score = market_regime(df_index)
     print("⚙️ MODE:", mode, "| score:", round(m_score, 3))
 
-    # 🔥 FIX: không được skip hoàn toàn DEFENSIVE
-    if mode == "DEFENSIVE":
-        print("⚠️ DEFENSIVE → giảm risk, KHÔNG tắt bot")
-    
     symbol_to_sector = {
         row["symbol"]: row["sector"]
         for _, row in df_symbols.iterrows()
     }
 
     # =========================
-    # SECTOR
+    # SECTOR FLOW
     # =========================
     sector_df = sector_money_flow(df_symbols)
     sector_df = sector_rotation(sector_df)
@@ -130,7 +124,7 @@ def main():
     leaders = list(set(leaders))
 
     # =========================
-    # SCORING
+    # SCORING (V5 CLEAN)
     # =========================
     scored = []
 
@@ -138,12 +132,11 @@ def main():
 
         try:
             df = load_stock_data(symbol)
-
-            if df is None or len(df) < 30:
+            if df is None or len(df) < 50:
                 continue
 
             df["value"] = df["close"] * df["volume"]
-            liq_score = np.tanh(df["value"].rolling(20).mean().iloc[-1] / 1e9)
+            liq = np.tanh(df["value"].rolling(20).mean().iloc[-1] / 1e9)
 
             rs = relative_strength(df, df_index)
             voe = voe_score(df, df_index)
@@ -160,7 +153,7 @@ def main():
 
             sector_row = sector_row.iloc[0]
 
-            leader_score = compute_leader_score(
+            score = compute_leader_score(
                 rs=rs,
                 rotation_score=sector_row["rotation_score"],
                 rs_sector=rs - sector_row.get("sector_return", 0),
@@ -171,9 +164,10 @@ def main():
                 voe=voe
             )
 
-            leader_score *= (0.7 + 0.6 * liq_score)
+            # 🔥 FIX: không amplify quá mức
+            score *= (0.8 + 0.4 * liq)
 
-            scored.append((symbol, leader_score))
+            scored.append((symbol, score))
 
         except Exception as e:
             print(symbol, "SCORING ERROR:", str(e))
@@ -217,9 +211,13 @@ def main():
 
             rr = reward / risk
 
-            # 🔥 FIX: nới RR (để có signal học)
-            if rr < 0.7 and mode != "AGGRESSIVE":
-                continue
+            # 🔥 FIX: dynamic RR
+            if mode == "AGGRESSIVE":
+                if rr < 0.8:
+                    continue
+            else:
+                if rr < 1.0:
+                    continue
 
             # =========================
             # MTF
@@ -230,9 +228,13 @@ def main():
             except:
                 mtf_score = 0
 
-            system_score = next((x[1] for x in scored if x[0] == symbol), 0)
+            base_score = next((x[1] for x in scored if x[0] == symbol), 0)
 
-            final_score = rr * (1 + system_score * 0.1) * (1 + mtf_score * 0.3)
+            final_score = (
+                rr *
+                (1 + base_score * 0.08) *
+                (1 + mtf_score * 0.25)
+            )
 
             signal = {
                 "symbol": symbol,
@@ -249,12 +251,14 @@ def main():
             }
 
             # =========================
-            # META V4
+            # META FILTER (V5 FIX)
             # =========================
             ok_meta, prob, p2, p3 = meta_filter_v5(signal)
 
-            # 🔥 FIX: soft filter
-            if prob < 0.48:
+            # 🔥 KEY FIX: dynamic threshold
+            th = 0.52 if mode == "AGGRESSIVE" else 0.56 if mode == "NEUTRAL" else 0.60
+
+            if prob < th:
                 continue
 
             # =========================
@@ -268,7 +272,8 @@ def main():
                 peak_equity=peak_equity
             )
 
-            size *= (0.7 + prob)
+            # 🔥 scale theo AI
+            size *= (0.6 + prob)
 
             risk_pct = (size * abs(signal["entry"] - signal["sl"])) / equity
 
@@ -299,7 +304,7 @@ def main():
 
     if signals:
 
-        msg = f"🔥 V4 SIGNALS | MODE: {mode}\n\n"
+        msg = f"🔥 V5 SIGNALS | MODE: {mode}\n\n"
 
         for s in signals[:10]:
             msg += (
@@ -307,7 +312,7 @@ def main():
                 f"Entry: {round(s['entry'],2)}\n"
                 f"SL: {round(s['sl'],2)}\n"
                 f"RR: {round(s['rr'],2)}\n"
-                f"AI Prob: {s['meta_prob']}\n"
+                f"AI: {s['meta_prob']}\n"
                 f"Size: {s['size']}\n"
                 f"Risk: {s['risk_pct']*100:.2f}%\n\n"
             )
