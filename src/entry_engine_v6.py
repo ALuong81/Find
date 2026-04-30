@@ -122,11 +122,16 @@ def entry_score(df, df_h1=None):
         # =========================
         recent_high = high.tail(5).max()
         break_strength = (price - recent_high) / (recent_high + 1e-6)
-
+        
         if break_strength > 0:
             score += min(break_strength * 50, 1.5)
+        elif break_strength > -0.02:
+            # sideway gần breakout → neutral
+            score += 0
         else:
-            score -= 1.0
+            # chỉ phạt nhẹ
+            score -= 0.3
+    
 
         # -------------------------
         # MOMENTUM (CLIPPED)
