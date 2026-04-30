@@ -82,11 +82,11 @@ def compute_atr(df, period=14):
 def dynamic_tp(entry, atr, regime):
 
     if regime == "AGGRESSIVE":
-        return entry + atr * 3
+        return entry + atr * 4
     elif regime == "NEUTRAL":
-        return entry + atr * 2
+        return entry + atr * 3
     else:
-        return entry + atr * 1.2
+        return entry + atr * 2
 
 
 # =========================
@@ -264,7 +264,8 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             # 🔥 FIX RS bias
-            threshold = 2.0 + rs * 0.5
+            # threshold = 2.0 + rs * 0.5
+            threshold = 1.6 * (1 - rs * 0.25)
             if f["score"] < threshold:
                 continue
 
@@ -278,7 +279,7 @@ def run_backtest(start_date="2023-01-01"):
                 continue
 
             rr = reward / risk
-            if rr < 1.3:
+            if rr < 1:
                 continue
 
             # =========================
@@ -296,8 +297,9 @@ def run_backtest(start_date="2023-01-01"):
             }
 
             prob = meta_filter_v6(signal)
-
-            if prob < 0.55:
+            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
+            
+            if prob < 0.48:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -316,7 +318,9 @@ def run_backtest(start_date="2023-01-01"):
             if dd > 0.25:
                 break
 
-            size_scale = 0.5 + prob * 0.8
+            # size_scale = 0.5 + prob * 0.8
+            size_scale = max(0.3, prob)
+            
             risk_amount = equity * base_risk_pct * size_scale
 
             if result == 1:
