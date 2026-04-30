@@ -16,7 +16,7 @@ from flow_timeline import flow_timeline
 
 from entry_engine import entry_score
 
-from meta_filter_v5 import meta_filter_v5
+from meta_filter_v6 import meta_filter_v6
 from meta_filter_v3_5 import update_model
 from meta_filter_v2 import save_meta
 
@@ -293,10 +293,14 @@ def run_backtest(start_date="2023-01-01"):
                 "perf": perf
             }
 
-            ok_meta, prob, p2, p3 = meta_filter_v5(signal)
+            #ok_meta, prob, p2, p3 = meta_filter_v5(signal)
+            prob = meta_filter_v6(signal)
+            if prob < 0.55:
+                continue
 
+    continue
             # 🔥 SOFT META (critical fix)
-            if not ok_meta and prob < 0.45:
+            if prob < 0.45:
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
