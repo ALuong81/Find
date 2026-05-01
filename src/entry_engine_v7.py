@@ -54,60 +54,57 @@ def entry_score_v7(df):
     volume = df["volume"]
 
     # =========================
-    # 1. RANGE DETECTION
+    # 1. RANGE (NỚI RA)
     # =========================
     recent_high = high.tail(20).max()
     recent_low = low.tail(20).min()
 
     range_pct = (recent_high - recent_low) / recent_low
 
-    # phải có tích lũy (range nhỏ)
-    if range_pct > 0.12:
+    if range_pct > 0.18:   # 🔥 từ 0.12 → 0.18
         return None
 
     # =========================
-    # 2. VOL COMPRESSION
+    # 2. VOL COMPRESSION (NỚI)
     # =========================
     vol_std_20 = close.pct_change().rolling(20).std().iloc[-1]
     vol_std_5 = close.pct_change().rolling(5).std().iloc[-1]
 
-    if vol_std_5 > vol_std_20:
+    if vol_std_5 > vol_std_20 * 1.2:   # 🔥 cho phép lệch nhẹ
         return None
 
     # =========================
-    # 3. BREAKOUT REAL
+    # 3. BREAKOUT (NỚI)
     # =========================
     entry = close.iloc[-1]
 
-    # phải break rõ ràng (không phải chạm)
-    if entry < recent_high * 1.01:
+    if entry < recent_high * 0.995:   # 🔥 từ 1.01 → 0.995
         return None
 
     # =========================
-    # 4. VOLUME EXPANSION
+    # 4. VOLUME (NỚI)
     # =========================
     vol_mean = volume.rolling(20).mean().iloc[-1]
 
-    if volume.iloc[-1] < vol_mean * 1.5:
+    if volume.iloc[-1] < vol_mean * 1.2:   # 🔥 từ 1.5 → 1.2
         return None
 
     # =========================
-    # 5. STOP LOSS SMART
+    # 5. SL
     # =========================
-    sl = recent_low  # đáy vùng tích lũy
-
+    sl = recent_low
     risk = entry - sl
+
     if risk <= 0:
         return None
 
     # =========================
-    # 6. QUALITY SCORE
+    # 6. SCORE
     # =========================
     score = 0
-
-    score += (0.12 - range_pct) * 10       # càng siết càng tốt
-    score += (vol_std_20 - vol_std_5) * 50 # càng nén càng tốt
-    score += (volume.iloc[-1] / vol_mean)  # volume càng lớn càng tốt
+    score += (0.18 - range_pct) * 8
+    score += (vol_std_20 - vol_std_5) * 30
+    score += (volume.iloc[-1] / vol_mean)
 
     return {
         "entry": entry,
