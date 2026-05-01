@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.4 (FINAL EDGE)
+# BACKTEST V6.5 (BALANCED EDGE)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -151,22 +151,13 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        if mode == "NEUTRAL" and abs(m_score) < 0.05:
-            continue
+        if mode != "AGGRESSIVE":
+            continue  # 🔥 chỉ trade khi thị trường tốt
 
-        # CONFIG
-        if mode == "AGGRESSIVE":
-            base_risk_pct = 0.02
-            max_trades = 2
-            rr_min = 1.2
-            tp_mult = 2.5
-        elif mode == "NEUTRAL":
-            base_risk_pct = 0.015
-            max_trades = 1
-            rr_min = 1.3
-            tp_mult = 2.0
-        else:
-            continue  # ❌ NO TRADE DEFENSIVE
+        base_risk_pct = 0.02
+        max_trades = 2
+        rr_min = 1.2
+        tp_mult = 2.5
 
         # =========================
         # SECTOR
@@ -229,25 +220,14 @@ def run_backtest(start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            # =========================
-            # TREND FILTER
-            # =========================
+            # TREND
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
-
-            if np.isnan(ma20) or np.isnan(ma50):
-                continue
 
             if ma20 <= ma50:
                 continue
 
-            # TREND STRENGTH
-            if abs(ma20 - ma50) / ma50 < 0.01:
-                continue
-
-            # =========================
             # ENTRY
-            # =========================
             f = entry_score(df)
             if f is None:
                 continue
@@ -256,30 +236,26 @@ def run_backtest(start_date="2023-01-01"):
 
             # VOL FILTER
             if f["volatility"] < 0.02:
-                print(f"{symbol} ❌ VOL")
                 continue
 
-            # 🔥 BREAKOUT CONFIRM
+            # 🔥 BREAKOUT MỀM (FIX CHÍNH)
             recent_high = df["high"].tail(20).max()
-            if f["entry"] < recent_high:
+            if f["entry"] < recent_high * 0.97:
                 print(f"{symbol} ❌ NO BREAKOUT")
                 continue
 
-            # 🔥 VOLUME CONFIRM
+            # 🔥 VOLUME (GIẢM ĐỘ GẮT)
             vol = df["volume"]
-            if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1] * 1.2:
+            if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1]:
                 print(f"{symbol} ❌ VOL WEAK")
                 continue
 
-            # RSI FILTER
+            # RSI
             rsi = compute_rsi(df["close"])
             if rsi > 80:
-                print(f"{symbol} ❌ RSI")
                 continue
 
-            # =========================
             # RR
-            # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
@@ -288,14 +264,11 @@ def run_backtest(start_date="2023-01-01"):
             rr = (tp - f["entry"]) / risk
 
             if rr < rr_min:
-                print(f"{symbol} ❌ RR")
                 continue
 
             print(f"{symbol} | rr={rr:.2f}")
 
-            # =========================
             # META → SIZE ONLY
-            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
