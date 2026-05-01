@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.2
+# BACKTEST
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -154,7 +154,6 @@ def run_backtest(start_date="2023-01-01"):
         if mode == "NEUTRAL" and abs(m_score) < 0.05:
             continue
 
-        # CONFIG
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
@@ -174,9 +173,6 @@ def run_backtest(start_date="2023-01-01"):
             tp_mult = 1.6
             meta_th = 0.50
 
-        # =========================
-        # SECTOR
-        # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
 
@@ -186,9 +182,6 @@ def run_backtest(start_date="2023-01-01"):
 
         leaders = list(set(leaders))
 
-        # =========================
-        # SCORING
-        # =========================
         scored = []
 
         for symbol in leaders:
@@ -231,7 +224,6 @@ def run_backtest(start_date="2023-01-01"):
             if trades_today >= max_trades:
                 break
 
-            # 🔥 SMART COOLDOWN
             if symbol in last_trade:
                 if (date - last_trade[symbol]).days < 3:
                     continue
@@ -239,9 +231,7 @@ def run_backtest(start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            # =========================
-            # TREND FILTER
-            # =========================
+            # TREND
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
@@ -251,37 +241,46 @@ def run_backtest(start_date="2023-01-01"):
             if ma20 <= ma50:
                 continue
 
-            # 🔥 TREND STRENGTH
             trend_strength = abs(ma20 - ma50) / ma50
             if trend_strength < 0.005:
                 continue
 
-            # =========================
-            # ENTRY
-            # =========================
             f = entry_score(df)
             if f is None:
                 continue
 
-            # 🔥 VOL FILTER
+            # DEBUG 1
+            print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
+
             if f["volatility"] < 0.015:
+                print(f"{symbol} ❌ VOL FAIL")
                 continue
 
-            # 🔥 ANTI LATE ENTRY
+            # 🔥 THRESHOLD
+            vol_adj = max(0.8, min(1.2, f["volatility"] * 20))
+            threshold = 1.0 * vol_adj * (1 - rs * 0.15)
+
+            print(f"{symbol} | th={threshold:.2f}")
+
+            if f["score"] < threshold:
+                print(f"{symbol} ❌ SCORE FAIL")
+                continue
+
+            # ANTI LATE
             recent_high = df["high"].tail(10).max()
             distance = (f["entry"] - recent_high) / recent_high
 
             if distance > 0.06:
+                print(f"{symbol} ❌ LATE ENTRY")
                 continue
 
-            # 🔥 RSI FILTER
+            # RSI
             rsi = compute_rsi(df["close"])
             if rsi > 85:
+                print(f"{symbol} ❌ RSI HIGH")
                 continue
 
-            # =========================
             # RR
-            # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
@@ -290,15 +289,14 @@ def run_backtest(start_date="2023-01-01"):
             rr = (tp - f["entry"]) / risk
 
             if rr > 3.0:
-                tp = f["entry"] + risk * 3.0
                 rr = 3.0
 
             if rr < rr_min:
+                print(f"{symbol} ❌ RR FAIL")
                 continue
 
-            # =========================
-            # META
-            # =========================
+            print(f"{symbol} | rr={rr:.2f}")
+
             signal = {
                 "symbol": symbol,
                 "rr": rr,
@@ -312,7 +310,10 @@ def run_backtest(start_date="2023-01-01"):
 
             prob = meta_filter_v6(signal)
 
+            print(f"{symbol} | prob={prob:.2f}")
+
             if prob < meta_th:
+                print(f"{symbol} ❌ META FAIL")
                 continue
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
