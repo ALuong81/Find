@@ -41,7 +41,7 @@ def compute_rsi(close, period=14):
 
 
 # =========================
-# ENTRY SCORE ENGINE (V7)
+# ENTRY SCORE ENGINE (V7.1)
 # =========================
 def entry_score_v7(df):
 
@@ -54,63 +54,76 @@ def entry_score_v7(df):
     volume = df["volume"]
 
     # =========================
-    # 1. RANGE (NỚI RA)
+    # RANGE
     # =========================
     recent_high = high.tail(20).max()
     recent_low = low.tail(20).min()
-
     range_pct = (recent_high - recent_low) / recent_low
 
-    if range_pct > 0.18:   # 🔥 từ 0.12 → 0.18
+    if range_pct > 0.18:
         return None
 
     # =========================
-    # 2. VOL COMPRESSION (NỚI)
+    # VOL COMPRESSION
     # =========================
     vol_std_20 = close.pct_change().rolling(20).std().iloc[-1]
     vol_std_5 = close.pct_change().rolling(5).std().iloc[-1]
 
-    if vol_std_5 > vol_std_20 * 1.2:   # 🔥 cho phép lệch nhẹ
+    if vol_std_5 > vol_std_20 * 1.2:
         return None
 
     # =========================
-    # 3. BREAKOUT (NỚI)
-    # =========================
-    entry = close.iloc[-1]
-
-    if entry < recent_high * 0.995:   # 🔥 từ 1.01 → 0.995
-        return None
-
-    # =========================
-    # 4. VOLUME (NỚI)
+    # VOLUME BASELINE
     # =========================
     vol_mean = volume.rolling(20).mean().iloc[-1]
 
-    if volume.iloc[-1] < vol_mean * 1.2:   # 🔥 từ 1.5 → 1.2
-        return None
+    # =========================
+    # MAIN BREAKOUT
+    # =========================
+    entry = close.iloc[-1]
+
+    if entry >= recent_high * 0.995:
+        if volume.iloc[-1] >= vol_mean * 1.2:
+
+            sl = recent_low
+            risk = entry - sl
+
+            if risk <= 0:
+                return None
+
+            score = 0
+            score += (0.18 - range_pct) * 8
+            score += (vol_std_20 - vol_std_5) * 30
+            score += (volume.iloc[-1] / vol_mean)
+
+            return {
+                "entry": entry,
+                "sl": sl,
+                "score": score,
+                "volatility": vol_std_20,
+                "liquidity": vol_mean,
+                "type": "breakout"
+            }
 
     # =========================
-    # 5. SL
+    # 🔥 FALLBACK ENTRY (EARLY BREAK)
     # =========================
-    sl = recent_low
-    risk = entry - sl
+    if entry > recent_high * 0.98:
+        if volume.iloc[-1] >= vol_mean * 1.2:
 
-    if risk <= 0:
-        return None
+            sl = recent_low
+            risk = entry - sl
 
-    # =========================
-    # 6. SCORE
-    # =========================
-    score = 0
-    score += (0.18 - range_pct) * 8
-    score += (vol_std_20 - vol_std_5) * 30
-    score += (volume.iloc[-1] / vol_mean)
+            if risk <= 0:
+                return None
 
-    return {
-        "entry": entry,
-        "sl": sl,
-        "score": score,
-        "volatility": vol_std_20,
-        "liquidity": vol_mean,
-        "type": "breakout"
-    }
+            return {
+                "entry": entry,
+                "sl": sl,
+                "score": 1.0,
+                "volatility": vol_std_20,
+                "liquidity": vol_mean,
+                "type": "early_break"
+            }
+
+    return None
