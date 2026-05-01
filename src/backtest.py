@@ -250,9 +250,9 @@ def run_backtest(config=None, start_date="2023-01-01"):
             # =========================
             # BREAKOUT (MỀM)
             # =========================
-            recent_high = df["high"].tail(20).max()
-            if f["entry"] < recent_high * config["breakout_buffer"]:
-                continue
+            #recent_high = df["high"].tail(20).max()
+            #if f["entry"] < recent_high * config["breakout_buffer"]:
+            #    continue
 
             # =========================
             # RSI
@@ -267,10 +267,13 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if risk <= 0:
                 continue
 
-            tp_mult = config["tp_base"] + vol * config["tp_vol_factor"]
-            tp = f["entry"] + risk * tp_mult
-            rr = (tp - f["entry"]) / risk
+            #tp_mult = config["tp_base"] + vol * config["tp_vol_factor"]
+            #tp = f["entry"] + risk * tp_mult
+            #rr = (tp - f["entry"]) / risk
 
+            tp = f["entry"] + risk * 2.0
+            rr = 2.0
+ 
             if rr < 1.2:
                 continue
 
