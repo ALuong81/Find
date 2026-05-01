@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.6 (REAL EDGE)
+# BACKTEST V6.6 (FINAL)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -151,14 +151,11 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        # 🔥 chỉ trade khi thị trường mạnh
         if mode != "AGGRESSIVE":
             continue
 
         base_risk_pct = 0.02
         max_trades = 2
-        rr_min = 1.3
-        tp_mult = 2.5
 
         # =========================
         # SECTOR
@@ -167,7 +164,7 @@ def run_backtest(start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(3).iterrows():
+        for _, row in sector_df.head(2).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -187,11 +184,6 @@ def run_backtest(start_date="2023-01-01"):
 
             try:
                 rs = relative_strength(df, df_index)
-
-                # 🔥 HARD FILTER RS
-                if rs < 0.55:
-                    continue
-
                 voe = voe_score(df, df_index)
                 inst = institutional_score(df)
                 inst_flow = institutional_flow_score(df)
@@ -210,8 +202,7 @@ def run_backtest(start_date="2023-01-01"):
             except:
                 continue
 
-        # 🔥 diversify hơn
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:8]
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:5]
 
         trades_today = 0
 
@@ -227,82 +218,57 @@ def run_backtest(start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            # =========================
             # TREND
-            # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
             if ma20 <= ma50:
                 continue
 
-            if abs(ma20 - ma50) / ma50 < 0.01:
-                continue
-
-            # =========================
-            # ENTRY
-            # =========================
             f = entry_score(df)
             if f is None:
                 continue
 
             print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
-            # 🔥 VOL FILTER
             if f["volatility"] < 0.02:
                 continue
 
-            # 🔥 LIQUIDITY FILTER
-            if f["liquidity"] < 0.3:
-                print(f"{symbol} ❌ LIQUID")
-                continue
-
-            # =========================
-            # BREAKOUT LOGIC (SMART)
-            # =========================
+            # 🔥 BREAKOUT ADAPTIVE
             recent_high = df["high"].tail(20).max()
+            breakout_buffer = 1 - min(0.03, f["volatility"])
 
-            vol_adj = max(0.98, 1 - f["volatility"] * 2)
-
-            if f["entry"] < recent_high * vol_adj:
+            if f["entry"] < recent_high * breakout_buffer:
                 print(f"{symbol} ❌ NO BREAKOUT")
                 continue
 
-            # 🔥 FAKE BREAKOUT FILTER (pullback nhẹ trước đó)
-            last_3_low = df["low"].tail(3).min()
-            if last_3_low > ma20:
-                print(f"{symbol} ❌ NO PULLBACK")
-                continue
-
-            # 🔥 VOLUME CONFIRM
+            # 🔥 VOLUME
             vol = df["volume"]
             if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1]:
                 print(f"{symbol} ❌ VOL WEAK")
                 continue
 
             # RSI
-            rsi = compute_rsi(df["close"])
-            if rsi > 80:
+            if compute_rsi(df["close"]) > 80:
                 continue
 
             # =========================
-            # RR
+            # RR ADAPTIVE
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
+            tp_mult = 2.0 + f["volatility"] * 10  # 🔥 KEY EDGE
             tp = f["entry"] + risk * tp_mult
             rr = (tp - f["entry"]) / risk
 
-            if rr < rr_min:
+            if rr < 1.2:
                 continue
 
             print(f"{symbol} | rr={rr:.2f}")
 
-            # =========================
-            # META (SIZE ONLY)
-            # =========================
+            # META SIZE
             signal = {
                 "symbol": symbol,
                 "rr": rr,
@@ -349,4 +315,3 @@ def run_backtest(start_date="2023-01-01"):
     save_meta()
 
     return pd.DataFrame(history)
-    
