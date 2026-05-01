@@ -157,19 +157,19 @@ def run_backtest(start_date="2023-01-01"):
             max_trades = 3
             rr_min = 1.1
             tp_mult = 2.5
-            meta_th = 0.48
+            meta_th = 0.52
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
             rr_min = 1.2
             tp_mult = 2.0
-            meta_th = 0.52
+            meta_th = 0.55
         else:
             base_risk_pct = 0.01
             max_trades = 1
             rr_min = 1.3
             tp_mult = 1.6
-            meta_th = 0.58
+            meta_th = 0.60
 
         # =========================
         # SECTOR
