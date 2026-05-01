@@ -25,14 +25,19 @@ MAX_HOLD_DAYS = 10
 
 
 # =========================
-# RR
+# RSI
 # =========================
-def calc_rr(entry, sl, tp):
-    risk = entry - sl
-    reward = tp - entry
-    if risk <= 0:
-        return 0
-    return reward / risk
+def compute_rsi(close, period=14):
+    delta = close.diff()
+    up = np.maximum(delta, 0.0)
+    down = np.maximum(-delta, 0.0)
+
+    ma_up = up.rolling(period).mean()
+    ma_down = down.rolling(period).mean()
+
+    rs = ma_up / (ma_down + 1e-9)
+    rsi = 100 - (100 / (1 + rs))
+    return float(rsi.iloc[-1])
 
 
 # =========================
@@ -111,10 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST
-# =========================
-# =========================
-# BACKTEST
+# BACKTEST V6.2
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -152,6 +154,7 @@ def run_backtest(start_date="2023-01-01"):
         if mode == "NEUTRAL" and abs(m_score) < 0.05:
             continue
 
+        # CONFIG
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
@@ -228,15 +231,16 @@ def run_backtest(start_date="2023-01-01"):
             if trades_today >= max_trades:
                 break
 
+            # 🔥 SMART COOLDOWN
             if symbol in last_trade:
-                if (date - last_trade[symbol]).days < 5:
+                if (date - last_trade[symbol]).days < 7:
                     continue
 
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
             # =========================
-            # 🔥 TREND FILTER (NEW)
+            # TREND FILTER
             # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
@@ -244,8 +248,12 @@ def run_backtest(start_date="2023-01-01"):
             if np.isnan(ma20) or np.isnan(ma50):
                 continue
 
-            trend_ok = ma20 > ma50
-            if not trend_ok:
+            if ma20 <= ma50:
+                continue
+
+            # 🔥 TREND STRENGTH
+            trend_strength = abs(ma20 - ma50) / ma50
+            if trend_strength < 0.02:
                 continue
 
             # =========================
@@ -255,17 +263,20 @@ def run_backtest(start_date="2023-01-01"):
             if f is None:
                 continue
 
-            print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
-
-            # VOL FILTER
+            # 🔥 VOL FILTER
             if f["volatility"] < 0.015:
                 continue
 
-            # ADAPTIVE THRESHOLD
-            vol_adj = max(0.8, min(1.2, f["volatility"] * 20))
-            threshold = 1.2 * vol_adj * (1 - rs * 0.2)
+            # 🔥 ANTI LATE ENTRY
+            recent_high = df["high"].tail(10).max()
+            distance = (f["entry"] - recent_high) / recent_high
 
-            if f["score"] < threshold:
+            if distance > 0.03:
+                continue
+
+            # 🔥 RSI FILTER
+            rsi = compute_rsi(df["close"])
+            if rsi > 75:
                 continue
 
             # =========================
@@ -285,8 +296,6 @@ def run_backtest(start_date="2023-01-01"):
             if rr < rr_min:
                 continue
 
-            print(f"{symbol} | rr={rr:.2f}")
-
             # =========================
             # META
             # =========================
@@ -302,8 +311,6 @@ def run_backtest(start_date="2023-01-01"):
             }
 
             prob = meta_filter_v6(signal)
-
-            print(f"{symbol} | prob={prob:.2f}")
 
             if prob < meta_th:
                 continue
