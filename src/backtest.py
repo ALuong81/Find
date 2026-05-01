@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.7 (REAL EDGE)
+# BACKTEST V6.7 (EDGE LOCK)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -151,15 +151,12 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        # 🔥 Trade both AGGRESSIVE + NEUTRAL (nhưng scale khác)
-        if mode == "AGGRESSIVE":
-            base_risk_pct = 0.02
-            max_trades = 3
-        elif mode == "NEUTRAL":
-            base_risk_pct = 0.012
-            max_trades = 2
-        else:
+        # 🔥 chỉ trade khi market rõ ràng
+        if mode != "AGGRESSIVE" or m_score < 0.4:
             continue
+
+        base_risk_pct = 0.02
+        max_trades = 1   # 🔥 giảm trade mạnh
 
         # =========================
         # SECTOR
@@ -168,7 +165,7 @@ def run_backtest(start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(3).iterrows():
+        for _, row in sector_df.head(1).iterrows():   # 🔥 chỉ top 1 sector
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -196,13 +193,9 @@ def run_backtest(start_date="2023-01-01"):
                 acc = detect_accumulation(df)
 
                 score = (
-                    rs * 2 +
-                    voe * 1.5 +
-                    inst * 1.2 +
-                    inst_flow * 1.8 +
-                    mf * 1.3 +
-                    flow_acc * 1.2 +
-                    (1 if acc else 0)
+                    rs * 2 + voe * 1.5 + inst * 1.2 +
+                    inst_flow * 1.8 + mf * 1.3 +
+                    flow_acc * 1.2 + (1 if acc else 0)
                 )
 
                 scored.append((symbol, score, rs))
@@ -210,83 +203,100 @@ def run_backtest(start_date="2023-01-01"):
             except:
                 continue
 
-        # 🔥 diversify hơn
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:8]
+        # 🔥 chỉ lấy TOP 2
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:2]
 
         trades_today = 0
 
-        for symbol, _, rs in scored:
+        for symbol, total_score, rs in scored:
 
             if trades_today >= max_trades:
                 break
 
             if symbol in last_trade:
-                if (date - last_trade[symbol]).days < 3:
+                if (date - last_trade[symbol]).days < 7:
                     continue
 
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            # TREND
+            # =========================
+            # TREND STRONG
+            # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
             if ma20 <= ma50:
                 continue
 
-            # ENTRY
+            if abs(ma20 - ma50) / ma50 < 0.015:   # 🔥 siết mạnh
+                continue
+
             f = entry_score(df)
             if f is None:
                 continue
 
             print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
-            # VOL FILTER (mềm hơn)
-            if f["volatility"] < 0.018:
-                continue
+            # =========================
+            # 🔥 VOL ADAPTIVE (FIX)
+            # =========================
+            vol = f["volatility"]
 
-            # 🔥 BREAKOUT ADAPTIVE (fix lớn nhất)
-            recent_high = df["high"].tail(20).max()
-            buffer = 1 - min(0.04, f["volatility"] * 1.5)
-
-            if f["entry"] < recent_high * buffer:
-                print(f"{symbol} ❌ NO BREAKOUT")
-                continue
-
-            # 🔥 VOLUME mềm hơn nữa
-            vol = df["volume"]
-            if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1] * 0.9:
-                print(f"{symbol} ❌ VOL WEAK")
-                continue
-
-            # RSI
-            if compute_rsi(df["close"]) > 85:
+            if vol < 0.03:   # 🔥 tăng ngưỡng
+                print(f"{symbol} ❌ VOL LOW")
                 continue
 
             # =========================
-            # RR ADAPTIVE (core edge)
+            # 🔥 BREAKOUT (STRONG)
+            # =========================
+            recent_high = df["high"].tail(20).max()
+
+            if f["entry"] < recent_high:
+                print(f"{symbol} ❌ NO BREAKOUT")
+                continue
+
+            # =========================
+            # 🔥 VOLUME CONFIRM
+            # =========================
+            vol_series = df["volume"]
+
+            if vol_series.iloc[-1] < vol_series.rolling(20).mean().iloc[-1] * 1.3:
+                print(f"{symbol} ❌ VOL WEAK")
+                continue
+
+            # =========================
+            # RSI
+            # =========================
+            if compute_rsi(df["close"]) > 75:
+                continue
+
+            # =========================
+            # RR
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            tp_mult = 1.8 + f["volatility"] * 12
+            tp_mult = 2.2 + vol * 8   # 🔥 ổn định hơn
             tp = f["entry"] + risk * tp_mult
             rr = (tp - f["entry"]) / risk
 
-            if rr < 1.1:
+            if rr < 1.5:   # 🔥 nâng chuẩn
                 continue
 
             print(f"{symbol} | rr={rr:.2f}")
 
-            # META SIZE
+            # =========================
+            # META FILTER (FIX CHÍNH)
+            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
                 "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
-                "volatility": f["volatility"],
+                "volatility": vol,
                 "liquidity": f["liquidity"],
                 "type": f["type"]
             }
@@ -294,7 +304,12 @@ def run_backtest(start_date="2023-01-01"):
             prob = meta_filter_v6(signal)
             print(f"{symbol} | prob={prob:.2f}")
 
-            size_scale = 0.3 + prob * 0.7
+            # 🔥 FILTER THẬT (KHÔNG CHỈ SIZE)
+            if prob < 0.55:
+                print(f"{symbol} ❌ META WEAK")
+                continue
+
+            size_scale = 0.5 + prob * 0.5   # 🔥 giảm variance
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
             if future_df.empty:
@@ -326,3 +341,4 @@ def run_backtest(start_date="2023-01-01"):
     save_meta()
 
     return pd.DataFrame(history)
+    
