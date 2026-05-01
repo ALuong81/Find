@@ -160,19 +160,19 @@ def run_backtest(start_date="2023-01-01"):
             max_trades = 3
             rr_min = 1.1
             tp_mult = 2.5
-            meta_th = 0.52
+            meta_th = 0.42
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
             rr_min = 1.2
             tp_mult = 2.0
-            meta_th = 0.55
+            meta_th = 0.45
         else:
             base_risk_pct = 0.01
             max_trades = 1
             rr_min = 1.3
             tp_mult = 1.6
-            meta_th = 0.60
+            meta_th = 0.50
 
         # =========================
         # SECTOR
@@ -233,7 +233,7 @@ def run_backtest(start_date="2023-01-01"):
 
             # 🔥 SMART COOLDOWN
             if symbol in last_trade:
-                if (date - last_trade[symbol]).days < 7:
+                if (date - last_trade[symbol]).days < 3:
                     continue
 
             df_full = data_map[symbol]
@@ -253,7 +253,7 @@ def run_backtest(start_date="2023-01-01"):
 
             # 🔥 TREND STRENGTH
             trend_strength = abs(ma20 - ma50) / ma50
-            if trend_strength < 0.02:
+            if trend_strength < 0.005:
                 continue
 
             # =========================
@@ -271,12 +271,12 @@ def run_backtest(start_date="2023-01-01"):
             recent_high = df["high"].tail(10).max()
             distance = (f["entry"] - recent_high) / recent_high
 
-            if distance > 0.03:
+            if distance > 0.06:
                 continue
 
             # 🔥 RSI FILTER
             rsi = compute_rsi(df["close"])
-            if rsi > 75:
+            if rsi > 85:
                 continue
 
             # =========================
