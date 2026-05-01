@@ -162,7 +162,8 @@ def run_backtest(config=None, start_date="2023-01-01"):
         mode, m_score = market_regime(df_index)
 
         # 🔥 giảm siết: cho trade cả AGGRESSIVE + NEUTRAL mạnh
-        if mode == "DEFENSIVE":
+        #if mode == "DEFENSIVE":
+        if mode != "AGGRESSIVE":
             continue
 
         base_risk_pct = 0.02
