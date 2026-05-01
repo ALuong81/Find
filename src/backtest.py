@@ -63,34 +63,7 @@ def market_regime(df_index):
 
 
 # =========================
-# ATR
-# =========================
-def compute_atr(df, period=14):
-    tr = np.maximum(
-        df["high"] - df["low"],
-        np.maximum(
-            abs(df["high"] - df["close"].shift()),
-            abs(df["low"] - df["close"].shift())
-        )
-    )
-    return tr.rolling(period).mean().iloc[-1]
-
-
-# =========================
-# DYNAMIC TP
-# =========================
-def dynamic_tp(entry, atr, regime):
-
-    if regime == "AGGRESSIVE":
-        return entry * (1 + atr * 3)
-    elif regime == "NEUTRAL":
-        return entry * (1 + atr * 2.2)
-    else:
-        return entry * (1 + atr * 1.6)
-
-
-# =========================
-# SIMULATE (FIXED)
+# SIMULATE
 # =========================
 def simulate_trade(df, entry, sl, tp):
 
@@ -99,7 +72,6 @@ def simulate_trade(df, entry, sl, tp):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # ambiguous case
         if l <= sl and h >= tp:
             return 0
 
@@ -139,7 +111,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6 FINAL
+# BACKTEST
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -174,20 +146,27 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        # 🔥 refined no trade
         if mode == "NEUTRAL" and abs(m_score) < 0.05:
             continue
 
-        # CONFIG
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
             max_trades = 3
+            rr_min = 1.1
+            tp_mult = 2.5
+            meta_th = 0.4
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
             max_trades = 2
+            rr_min = 1.2
+            tp_mult = 2.0
+            meta_th = 0.45
         else:
             base_risk_pct = 0.01
             max_trades = 1
+            rr_min = 1.3
+            tp_mult = 1.6
+            meta_th = 0.52
 
         # =========================
         # SECTOR
@@ -254,54 +233,42 @@ def run_backtest(start_date="2023-01-01"):
             df = df_full[df_full["date"] <= date]
 
             f = entry_score(df)
-            
-            if f:
-                print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
-            
-            # print(symbol, f)
-            
             if f is None:
                 continue
 
-            # 🔥 FIX RS bias
-            threshold = 1.2 * (1 - rs * 0.2)
+            print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
-            print(f"{symbol} | score={f['score']:.2f} | threshold={threshold:.2f} | vol={f['volatility']:.3f}")
-            
-            
+            threshold = 1.2 * (1 - rs * 0.2)
             if f["score"] < threshold:
                 continue
-            
-            atr = compute_atr(df)
-            tp = dynamic_tp(f["entry"], atr, mode)
-            # tp = f["tp1"]  # dùng TP từ entry engine
-            
+
+            # =========================
+            # RR FIX (CORE)
+            # =========================
             risk = f["entry"] - f["sl"]
-            reward = tp - f["entry"]
-            print(f"{symbol} | score={f['score']:.2f} | threshold={threshold:.2f} | risk={risk:.2f} | reward={reward:.2f} | vol={f['volatility']:.3f}")
-            
             if risk <= 0:
                 continue
-                
-            rr = reward / risk
 
-            
-            if mode == "AGGRESSIVE":
-                rr_min = 1.1
-            elif mode == "NEUTRAL":
-                rr_min = 1.2
-            else:
-                rr_min = 1.3
-            
+            tp = f["entry"] + risk * tp_mult
+
+            rr = (tp - f["entry"]) / risk
+
+            # 🔥 clamp RR
+            if rr > 3.0:
+                tp = f["entry"] + risk * 3.0
+                rr = 3.0
+
             if rr < rr_min:
                 continue
-            print(f"{symbol} | rr={rr:.2f} | rr_min={rr_min:.2f}")
+
+            print(f"{symbol} | rr={rr:.2f}")
+
             # =========================
-            # META INPUT FIXED
+            # META
             # =========================
             signal = {
                 "symbol": symbol,
-                "rr": rr,
+                "rr": min(rr, 3.0),
                 "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
@@ -311,15 +278,9 @@ def run_backtest(start_date="2023-01-01"):
             }
 
             prob = meta_filter_v6(signal)
-            print(f"{symbol} | score={f['score']:.2f} | rr={rr:.2f} | prob={prob:.2f}")
 
-            if mode == "AGGRESSIVE":
-                meta_th = 0.4
-            elif mode == "NEUTRAL":
-                meta_th = 0.45
-            else:
-                meta_th = 0.52
-                
+            print(f"{symbol} | prob={prob:.2f}")
+
             if prob < meta_th:
                 continue
 
@@ -331,17 +292,11 @@ def run_backtest(start_date="2023-01-01"):
 
             update_meta_v6(signal, result)
 
-            # =========================
-            # RISK FIXED
-            # =========================
             dd = (peak_equity - equity) / peak_equity
-
             if dd > 0.25:
                 break
 
-            # size_scale = 0.5 + prob * 0.8
             size_scale = max(0.3, prob)
-            
             risk_amount = equity * base_risk_pct * size_scale
 
             if result == 1:
