@@ -4,3 +4,4 @@ requests
 vnstock
 matplotlib
 seaborn
+scikit-learn==1.4.2
