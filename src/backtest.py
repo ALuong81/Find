@@ -162,8 +162,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         mode, m_score = market_regime(df_index)
 
         # 🔥 giảm siết: cho trade cả AGGRESSIVE + NEUTRAL mạnh
-        #if mode == "DEFENSIVE":
-        if mode != "AGGRESSIVE":
+        if mode == "DEFENSIVE":
             continue
 
         base_risk_pct = 0.02
@@ -176,7 +175,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(2).iterrows():
+        for _, row in sector_df.head(5).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -233,7 +232,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
-            if ma20 <= ma50:
+            if abs(ma20 - ma50) / ma50 < 0.005:
                 continue
 
             f = entry_score_v7(df)
