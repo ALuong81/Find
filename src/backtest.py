@@ -113,6 +113,9 @@ def preload_all(symbols):
 # =========================
 # BACKTEST
 # =========================
+# =========================
+# BACKTEST
+# =========================
 def run_backtest(start_date="2023-01-01"):
 
     start_date = pd.to_datetime(start_date)
@@ -232,34 +235,49 @@ def run_backtest(start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
+            # =========================
+            # 🔥 TREND FILTER (NEW)
+            # =========================
+            ma20 = df["close"].rolling(20).mean().iloc[-1]
+            ma50 = df["close"].rolling(50).mean().iloc[-1]
+
+            if np.isnan(ma20) or np.isnan(ma50):
+                continue
+
+            trend_ok = ma20 > ma50
+            if not trend_ok:
+                continue
+
+            # =========================
+            # ENTRY
+            # =========================
             f = entry_score(df)
             if f is None:
                 continue
 
             print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
+            # VOL FILTER
             if f["volatility"] < 0.015:
                 continue
-            
-            # threshold = 1.2 * (1 - rs * 0.2)
+
+            # ADAPTIVE THRESHOLD
             vol_adj = max(0.8, min(1.2, f["volatility"] * 20))
             threshold = 1.2 * vol_adj * (1 - rs * 0.2)
-            
+
             if f["score"] < threshold:
                 continue
 
             # =========================
-            # RR FIX (CORE)
+            # RR
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
             tp = f["entry"] + risk * tp_mult
-
             rr = (tp - f["entry"]) / risk
 
-            # 🔥 clamp RR
             if rr > 3.0:
                 tp = f["entry"] + risk * 3.0
                 rr = 3.0
@@ -274,7 +292,7 @@ def run_backtest(start_date="2023-01-01"):
             # =========================
             signal = {
                 "symbol": symbol,
-                "rr": min(rr, 3.0),
+                "rr": rr,
                 "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
