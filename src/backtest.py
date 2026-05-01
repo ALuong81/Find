@@ -14,7 +14,7 @@ from institutional_flow import institutional_flow_score
 from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
-from entry_engine_v7 import entry_score
+from entry_engine_v7 import entry_score_v7
 
 from meta_filter_v6 import meta_filter_v6, update_meta_v6, save_meta
 
@@ -235,7 +235,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if ma20 <= ma50:
                 continue
 
-            f = entry_score(df)
+            f = entry_score_v7(df)
             if f is None:
                 continue
 
