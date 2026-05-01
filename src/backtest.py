@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.5 (BALANCED EDGE)
+# BACKTEST V6.6 (REAL EDGE)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -151,12 +151,13 @@ def run_backtest(start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
+        # 🔥 chỉ trade khi thị trường mạnh
         if mode != "AGGRESSIVE":
-            continue  # 🔥 chỉ trade khi thị trường tốt
+            continue
 
         base_risk_pct = 0.02
         max_trades = 2
-        rr_min = 1.2
+        rr_min = 1.3
         tp_mult = 2.5
 
         # =========================
@@ -166,7 +167,7 @@ def run_backtest(start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(2).iterrows():
+        for _, row in sector_df.head(3).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -186,6 +187,11 @@ def run_backtest(start_date="2023-01-01"):
 
             try:
                 rs = relative_strength(df, df_index)
+
+                # 🔥 HARD FILTER RS
+                if rs < 0.55:
+                    continue
+
                 voe = voe_score(df, df_index)
                 inst = institutional_score(df)
                 inst_flow = institutional_flow_score(df)
@@ -204,7 +210,8 @@ def run_backtest(start_date="2023-01-01"):
             except:
                 continue
 
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:5]
+        # 🔥 diversify hơn
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:8]
 
         trades_today = 0
 
@@ -220,31 +227,54 @@ def run_backtest(start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
+            # =========================
             # TREND
+            # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
             if ma20 <= ma50:
                 continue
 
+            if abs(ma20 - ma50) / ma50 < 0.01:
+                continue
+
+            # =========================
             # ENTRY
+            # =========================
             f = entry_score(df)
             if f is None:
                 continue
 
             print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
-            # VOL FILTER
+            # 🔥 VOL FILTER
             if f["volatility"] < 0.02:
                 continue
 
-            # 🔥 BREAKOUT MỀM (FIX CHÍNH)
+            # 🔥 LIQUIDITY FILTER
+            if f["liquidity"] < 0.3:
+                print(f"{symbol} ❌ LIQUID")
+                continue
+
+            # =========================
+            # BREAKOUT LOGIC (SMART)
+            # =========================
             recent_high = df["high"].tail(20).max()
-            if f["entry"] < recent_high * 0.97:
+
+            vol_adj = max(0.98, 1 - f["volatility"] * 2)
+
+            if f["entry"] < recent_high * vol_adj:
                 print(f"{symbol} ❌ NO BREAKOUT")
                 continue
 
-            # 🔥 VOLUME (GIẢM ĐỘ GẮT)
+            # 🔥 FAKE BREAKOUT FILTER (pullback nhẹ trước đó)
+            last_3_low = df["low"].tail(3).min()
+            if last_3_low > ma20:
+                print(f"{symbol} ❌ NO PULLBACK")
+                continue
+
+            # 🔥 VOLUME CONFIRM
             vol = df["volume"]
             if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1]:
                 print(f"{symbol} ❌ VOL WEAK")
@@ -255,7 +285,9 @@ def run_backtest(start_date="2023-01-01"):
             if rsi > 80:
                 continue
 
+            # =========================
             # RR
+            # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
@@ -268,7 +300,9 @@ def run_backtest(start_date="2023-01-01"):
 
             print(f"{symbol} | rr={rr:.2f}")
 
-            # META → SIZE ONLY
+            # =========================
+            # META (SIZE ONLY)
+            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
@@ -315,3 +349,4 @@ def run_backtest(start_date="2023-01-01"):
     save_meta()
 
     return pd.DataFrame(history)
+    
