@@ -244,8 +244,8 @@ def run_backtest(config=None, start_date="2023-01-01"):
             # =========================
             # VOL FILTER
             # =========================
-            if vol < config["vol_min"]:
-                continue
+            #if vol < config["vol_min"]:
+            #    continue
 
             # =========================
             # BREAKOUT (MỀM)
