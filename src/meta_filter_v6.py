@@ -4,16 +4,14 @@ import pickle
 import os
 import time
 
-# =========================
-# OPTIONAL SKLEARN
-# =========================
+# 🔥 SAFE IMPORT (KHÔNG CÓ SKLEARN VẪN CHẠY)
 try:
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
     SKLEARN_AVAILABLE = True
 except:
     SKLEARN_AVAILABLE = False
-
+    print("⚠️ sklearn not available → fallback mode")
 
 MODEL_PATH = "meta_model.pkl"
 DATA_PATH = "meta_data.csv"
@@ -49,7 +47,7 @@ def encode_signal(signal):
         signal["liquidity"],
         regime_map.get(signal["regime"], 0),
         type_map.get(signal["type"], 0)
-    ], dtype=float)
+    ])
 
 
 # =========================
@@ -58,19 +56,13 @@ def encode_signal(signal):
 def load_model():
     if not os.path.exists(MODEL_PATH):
         return None, None
-    try:
-        with open(MODEL_PATH, "rb") as f:
-            return pickle.load(f)
-    except:
-        return None, None
+    with open(MODEL_PATH, "rb") as f:
+        return pickle.load(f)
 
 
 def save_model(model, scaler):
-    try:
-        with open(MODEL_PATH, "wb") as f:
-            pickle.dump((model, scaler), f)
-    except:
-        print("⚠️ Cannot save model")
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump((model, scaler), f)
 
 
 # =========================
@@ -85,7 +77,7 @@ def safe_append(df_row, max_retry=3):
         except PermissionError:
             time.sleep(0.2)
 
-    print("⚠️ Cannot write meta_data.csv (file may be open)")
+    print("⚠️ Cannot write meta_data.csv (file locked)")
 
 
 # =========================
@@ -109,63 +101,61 @@ def update_meta_v6(signal, result):
 def train_meta_model():
 
     if not SKLEARN_AVAILABLE:
-        print("⚠️ sklearn not available → skip training")
+        print("⚠️ skip training (no sklearn)")
         return
 
     ensure_data_file()
 
-    try:
-        df = pd.read_csv(DATA_PATH)
-    except:
-        print("⚠️ Cannot read meta_data.csv")
-        return
+    df = pd.read_csv(DATA_PATH)
 
-    # chưa đủ data → không train
     if len(df) < 200:
+        print("⚠️ not enough data to train meta")
         return
 
     X = df.iloc[:, :-1].values
     y = df.iloc[:, -1].values
 
-    try:
-        scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(X)
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
 
-        model = LogisticRegression(max_iter=200)
-        model.fit(X_scaled, y)
+    model = LogisticRegression(max_iter=200)
+    model.fit(X_scaled, y)
 
-        save_model(model, scaler)
+    save_model(model, scaler)
 
-        print("Meta model updated")
-
-    except Exception as e:
-        print(f"⚠️ Training failed: {e}")
+    print("✅ Meta model updated")
 
 
 # =========================
-# SIMPLE FALLBACK MODEL
+# 🔥 FALLBACK LOGIC (NO SKLEARN)
 # =========================
-def fallback_score(signal):
+def fallback_prob(signal):
     """
-    Khi không có sklearn → dùng heuristic nhẹ
+    Khi không có model → dùng heuristic thông minh
     """
 
     score = 0
 
-    score += signal["rr"] * 0.2
-    score += signal["score"] * 0.15
-    score += signal["correlation"] * 0.1
-    score += signal["volatility"] * 5
-    score += signal["liquidity"] * 0.05
+    # RR cao → tốt
+    score += (signal["rr"] - 1.5) * 0.3
 
+    # entry score mạnh
+    score += signal["score"] * 0.15
+
+    # volatility tốt
+    score += signal["volatility"] * 5
+
+    # correlation thấp tốt hơn (tránh market risk)
+    score -= abs(signal["correlation"]) * 0.2
+
+    # regime boost
     if signal["regime"] == "AGGRESSIVE":
         score += 0.3
 
-    if signal["type"] == "breakout":
-        score += 0.2
+    # sigmoid squash
+    prob = 1 / (1 + np.exp(-score))
 
-    # squash về 0–1
-    return float(1 / (1 + np.exp(-score)))
+    return float(np.clip(prob, 0.3, 0.8))  # tránh overconfidence
 
 
 # =========================
@@ -173,24 +163,23 @@ def fallback_score(signal):
 # =========================
 def meta_filter_v6(signal):
 
-    # ❌ không có sklearn → fallback
-    if not SKLEARN_AVAILABLE:
-        return fallback_score(signal)
-
     model, scaler = load_model()
 
-    # ❌ chưa có model → fallback nhẹ
-    if model is None or scaler is None:
-        return fallback_score(signal)
+    # 🔥 nếu chưa có model → dùng fallback
+    if model is None or not SKLEARN_AVAILABLE:
+        return fallback_prob(signal)
 
     try:
         x = encode_signal(signal).reshape(1, -1)
         x_scaled = scaler.transform(x)
 
-        return float(model.predict_proba(x_scaled)[0][1])
+        prob = float(model.predict_proba(x_scaled)[0][1])
+
+        # clamp tránh overfit
+        return float(np.clip(prob, 0.2, 0.9))
 
     except:
-        return fallback_score(signal)
+        return fallback_prob(signal)
 
 
 # =========================
@@ -198,4 +187,3 @@ def meta_filter_v6(signal):
 # =========================
 def save_meta():
     train_meta_model()
-    
