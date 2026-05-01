@@ -1,4 +1,4 @@
-from backtest import run_backtest
+from backtest import run_backtest, DEFAULT_CONFIG
 import numpy as np
 import pandas as pd
 
@@ -7,7 +7,22 @@ def main():
 
     print("🚀 START BACKTEST")
 
-    df = run_backtest("2023-01-01")
+    # =========================
+    # CONFIG (có thể tuning sau)
+    # =========================
+    config = DEFAULT_CONFIG.copy()
+
+    # ví dụ tweak nhanh:
+    # config["vol_min"] = 0.025
+    # config["meta_threshold"] = 0.55
+
+    # =========================
+    # RUN (🔥 gọi đúng param)
+    # =========================
+    df = run_backtest(
+        start_date="2023-01-01",
+        config=config
+    )
 
     if df is None or df.empty:
         print("⚠️ NO TRADE DATA")
@@ -29,8 +44,8 @@ def main():
     total_trades = len(df)
     winrate = (df["result"] == 1).mean()
 
-    avg_win = returns[returns > 0].mean() if len(returns[returns > 0]) > 0 else 0
-    avg_loss = returns[returns < 0].mean() if len(returns[returns < 0]) > 0 else 0
+    avg_win = returns[returns > 0].mean() if not returns[returns > 0].empty else 0
+    avg_loss = returns[returns < 0].mean() if not returns[returns < 0].empty else 0
 
     expectancy = winrate * avg_win + (1 - winrate) * avg_loss
 
@@ -65,6 +80,13 @@ def main():
     # =========================
     print("\n===== LAST 5 TRADES =====")
     print(df.tail())
+
+    # =========================
+    # QUICK INSIGHT (🔥 thêm)
+    # =========================
+    print("\n===== QUICK STATS =====")
+    print("Avg RR:", round(df["rr"].mean(), 2))
+    print("Avg Meta Prob:", round(df["meta_prob"].mean(), 3))
 
 
 if __name__ == "__main__":
