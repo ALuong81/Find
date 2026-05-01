@@ -116,7 +116,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.3 (META FIX)
+# BACKTEST V6.4 (FINAL EDGE)
 # =========================
 def run_backtest(start_date="2023-01-01"):
 
@@ -157,19 +157,16 @@ def run_backtest(start_date="2023-01-01"):
         # CONFIG
         if mode == "AGGRESSIVE":
             base_risk_pct = 0.02
-            max_trades = 3
-            rr_min = 1.1
+            max_trades = 2
+            rr_min = 1.2
             tp_mult = 2.5
         elif mode == "NEUTRAL":
             base_risk_pct = 0.015
-            max_trades = 2
-            rr_min = 1.2
-            tp_mult = 2.0
-        else:
-            base_risk_pct = 0.01
             max_trades = 1
             rr_min = 1.3
-            tp_mult = 1.6
+            tp_mult = 2.0
+        else:
+            continue  # ❌ NO TRADE DEFENSIVE
 
         # =========================
         # SECTOR
@@ -178,7 +175,7 @@ def run_backtest(start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(3).iterrows():
+        for _, row in sector_df.head(2).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -216,7 +213,7 @@ def run_backtest(start_date="2023-01-01"):
             except:
                 continue
 
-        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:10]
+        scored = sorted(scored, key=lambda x: x[1], reverse=True)[:5]
 
         trades_today = 0
 
@@ -226,13 +223,15 @@ def run_backtest(start_date="2023-01-01"):
                 break
 
             if symbol in last_trade:
-                if (date - last_trade[symbol]).days < 3:
+                if (date - last_trade[symbol]).days < 5:
                     continue
 
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            # TREND
+            # =========================
+            # TREND FILTER
+            # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
 
@@ -242,10 +241,13 @@ def run_backtest(start_date="2023-01-01"):
             if ma20 <= ma50:
                 continue
 
-            trend_strength = abs(ma20 - ma50) / ma50
-            if trend_strength < 0.005:
+            # TREND STRENGTH
+            if abs(ma20 - ma50) / ma50 < 0.01:
                 continue
 
+            # =========================
+            # ENTRY
+            # =========================
             f = entry_score(df)
             if f is None:
                 continue
@@ -253,33 +255,37 @@ def run_backtest(start_date="2023-01-01"):
             print(f"{symbol} | score={f['score']:.2f} | vol={f['volatility']:.3f}")
 
             # VOL FILTER
-            if f["volatility"] < 0.015:
+            if f["volatility"] < 0.02:
                 print(f"{symbol} ❌ VOL")
                 continue
 
-            # THRESHOLD
-            vol_adj = max(0.8, min(1.2, f["volatility"] * 20))
-            threshold = 1.0 * vol_adj * (1 - rs * 0.15)
-
-            print(f"{symbol} | th={threshold:.2f}")
-
-            if f["score"] < threshold:
-                print(f"{symbol} ❌ SCORE")
+            # 🔥 BREAKOUT CONFIRM
+            recent_high = df["high"].tail(20).max()
+            if f["entry"] < recent_high:
+                print(f"{symbol} ❌ NO BREAKOUT")
                 continue
 
-            # RSI
+            # 🔥 VOLUME CONFIRM
+            vol = df["volume"]
+            if vol.iloc[-1] < vol.rolling(20).mean().iloc[-1] * 1.2:
+                print(f"{symbol} ❌ VOL WEAK")
+                continue
+
+            # RSI FILTER
             rsi = compute_rsi(df["close"])
-            if rsi > 85:
+            if rsi > 80:
                 print(f"{symbol} ❌ RSI")
                 continue
 
+            # =========================
             # RR
+            # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
             tp = f["entry"] + risk * tp_mult
-            rr = min(3.0, (tp - f["entry"]) / risk)
+            rr = (tp - f["entry"]) / risk
 
             if rr < rr_min:
                 print(f"{symbol} ❌ RR")
@@ -287,7 +293,9 @@ def run_backtest(start_date="2023-01-01"):
 
             print(f"{symbol} | rr={rr:.2f}")
 
+            # =========================
             # META → SIZE ONLY
+            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
@@ -302,7 +310,6 @@ def run_backtest(start_date="2023-01-01"):
             prob = meta_filter_v6(signal)
             print(f"{symbol} | prob={prob:.2f}")
 
-            # 🔥 KHÔNG FILTER
             size_scale = 0.3 + prob * 0.7
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
