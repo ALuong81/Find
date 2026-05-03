@@ -240,6 +240,9 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 print(f"{symbol} ❌ NO ENTRY")
                 continue
 
+            # 🔥 DEBUG ENTRY
+            print(symbol, f["type"], round(f["score"], 2))
+
             vol = f["volatility"]
 
             # =========================
