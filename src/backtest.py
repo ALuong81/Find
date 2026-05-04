@@ -15,7 +15,6 @@ from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
 from entry_engine_v7 import entry_score_v7
-
 from meta_filter_v6 import meta_filter_v6, update_meta_v6, save_meta
 
 
@@ -24,15 +23,11 @@ MAX_HOLD_DAYS = 10
 
 
 # =========================
-# CONFIG (🔥 AUTO-TUNE READY)
+# CONFIG (EDGE READY)
 # =========================
 DEFAULT_CONFIG = {
-    "vol_min": 0.02,
-    "breakout_buffer": 0.98,
-    "rsi_max": 80,
-    "tp_base": 2.0,
-    "tp_vol_factor": 8.0,
-    "meta_threshold": 0.5,
+    "rsi_max": 78,
+    "meta_threshold": 0.55,
     "cooldown_days": 3,
     "max_trades": 2
 }
@@ -82,20 +77,35 @@ def market_regime(df_index):
 
 
 # =========================
-# SIMULATE
+# 🔥 EXIT ENGINE (EDGE THẬT)
 # =========================
-def simulate_trade(df, entry, sl, tp):
+def simulate_trade(df, entry, sl, rr):
+
+    tp1 = entry + (entry - sl) * 1.0   # RR 1
+    tp2 = entry + (entry - sl) * rr    # RR full
+
+    hit_tp1 = False
 
     for i in range(len(df)):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        if l <= sl and h >= tp:
-            return 0
+        # SL
         if l <= sl:
             return -1
-        if h >= tp:
+
+        # TP1
+        if not hit_tp1 and h >= tp1:
+            hit_tp1 = True
+            sl = entry  # 🔥 BE
+
+        # TP2
+        if h >= tp2:
             return 1
+
+    # nếu không hit gì → breakeven nếu đã TP1
+    if hit_tp1:
+        return 0
 
     return 0
 
@@ -127,7 +137,7 @@ def preload_all(symbols):
 
 
 # =========================
-# BACKTEST V6.8
+# BACKTEST EDGE VERSION
 # =========================
 def run_backtest(config=None, start_date="2023-01-01"):
 
@@ -161,7 +171,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
         mode, m_score = market_regime(df_index)
 
-        # 🔥 giảm siết: cho trade cả AGGRESSIVE + NEUTRAL mạnh
+        # 🔥 chỉ trade khi market có bias
         if mode == "DEFENSIVE":
             continue
 
@@ -175,7 +185,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(5).iterrows():
+        for _, row in sector_df.head(3).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
@@ -203,9 +213,13 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 acc = detect_accumulation(df)
 
                 score = (
-                    rs * 2 + voe * 1.5 + inst * 1.2 +
-                    inst_flow * 1.8 + mf * 1.3 +
-                    flow_acc * 1.2 + (1 if acc else 0)
+                    rs * 2 +
+                    voe * 1.5 +
+                    inst * 1.2 +
+                    inst_flow * 1.8 +
+                    mf * 1.3 +
+                    flow_acc * 1.2 +
+                    (1 if acc else 0)
                 )
 
                 scored.append((symbol, score, rs))
@@ -229,60 +243,30 @@ def run_backtest(config=None, start_date="2023-01-01"):
             df_full = data_map[symbol]
             df = df_full[df_full["date"] <= date]
 
-            ma20 = df["close"].rolling(20).mean().iloc[-1]
-            ma50 = df["close"].rolling(50).mean().iloc[-1]
-
-            if abs(ma20 - ma50) / ma50 < 0.005:
-                continue
-
             f = entry_score_v7(df)
+
             if f is None:
-                print(f"{symbol} ❌ NO ENTRY")
                 continue
 
-            # 🔥 DEBUG ENTRY
             print(symbol, f["type"], round(f["score"], 2))
 
-            vol = f["volatility"]
-
             # =========================
-            # VOL FILTER
-            # =========================
-            #if vol < config["vol_min"]:
-            #    continue
-
-            # =========================
-            # BREAKOUT (MỀM)
-            # =========================
-            #recent_high = df["high"].tail(20).max()
-            #if f["entry"] < recent_high * config["breakout_buffer"]:
-            #    continue
-
-            # =========================
-            # RSI
+            # RSI FILTER
             # =========================
             if compute_rsi(df["close"]) > config["rsi_max"]:
                 continue
 
             # =========================
-            # RR
+            # RR DYNAMIC
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            #tp_mult = config["tp_base"] + vol * config["tp_vol_factor"]
-            #tp = f["entry"] + risk * tp_mult
-            #rr = (tp - f["entry"]) / risk
-
-            tp = f["entry"] + risk * 2.0
-            rr = 2.0
- 
-            if rr < 1.2:
-                continue
+            rr = 1.5 + f["score"] * 0.2   # 🔥 EDGE CORE
 
             # =========================
-            # META (🔥 chỉ size, KHÔNG filter nếu chưa train)
+            # META FILTER
             # =========================
             signal = {
                 "symbol": symbol,
@@ -290,14 +274,13 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
-                "volatility": vol,
+                "volatility": f["volatility"],
                 "liquidity": f["liquidity"],
                 "type": f["type"]
             }
 
             prob = meta_filter_v6(signal)
 
-            # 🔥 nếu chưa có model → prob ~0.5 → không nên filter
             if prob < config["meta_threshold"]:
                 continue
 
@@ -307,7 +290,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if future_df.empty:
                 continue
 
-            result = simulate_trade(future_df, f["entry"], f["sl"], tp)
+            result = simulate_trade(future_df, f["entry"], f["sl"], rr)
 
             update_meta_v6(signal, result)
 
