@@ -15,7 +15,7 @@ from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
 from entry_engine_v7 import entry_score_v7
-from meta_filter_v7 import meta_filter_v7, update_meta_v6, save_meta
+from meta_filter_v6 import meta_filter_v6, update_meta_v6, save_meta
 
 
 INITIAL_CAPITAL = 100000
@@ -279,7 +279,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 "type": f["type"]
             }
 
-            prob = meta_filter_v7(signal)
+            prob = meta_filter_v6(signal)
 
             if prob < config["meta_threshold"]:
                 continue
@@ -292,7 +292,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             result = simulate_trade(future_df, f["entry"], f["sl"], rr)
 
-            update_meta_v7(signal, result)
+            update_meta_v6(signal, result)
 
             risk_amount = equity * base_risk_pct * size_scale
 
