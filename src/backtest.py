@@ -73,23 +73,20 @@ def simulate_trade(df, entry, sl, rr):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # ❗ SL cứng
         if l <= sl:
             return -1
 
-        # 🔥 TP1 → BE
         if not hit_tp1 and h >= tp1:
             hit_tp1 = True
             sl = entry
 
-        # 🔥 TP2
         if h >= tp2:
             return 1
 
-        # 🔥 TIME STOP THÔNG MINH
-        if i >= 7:
+        # 🔥 FIX: cắt sớm hơn
+        if i >= 5:
             if not hit_tp1:
-                return -0.5   # 🔥 loss nhẹ thay vì 0
+                return -0.5
 
     return 0
 
@@ -156,6 +153,10 @@ def run_backtest(config=None, start_date="2023-01-01"):
         mode, _ = market_regime(df_index)
 
         if mode == "DEFENSIVE":
+            continue
+
+        # 🔥 NEW: MARKET MOMENTUM FILTER
+        if df_index["close"].iloc[-1] < df_index["close"].iloc[-5]:
             continue
 
         base_risk_pct = 0.02
@@ -231,30 +232,32 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 print(symbol, "⛔ entry_fail")
                 continue
 
-            # =========================
-            # 🔥 MOMENTUM FILTER (FIX)
-            # =========================
+            # 🔥 NEW: SIDEWAY FILTER
+            range_10 = (df["high"].tail(10).max() - df["low"].tail(10).min()) / df["low"].tail(10).min()
+            if range_10 < 0.03:
+                continue
+
+            # 🔥 MOMENTUM
             if df["close"].iloc[-1] < df["close"].iloc[-3]:
                 continue
 
-            # 🔥 tránh nến đảo chiều
+            # 🔥 BREAKOUT CONFIRM
+            if df["close"].iloc[-1] < df["high"].iloc[-2]:
+                continue
+
+            # 🔥 tránh nến đỏ
             if df["close"].iloc[-1] < df["open"].iloc[-1]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
 
-            # =========================
-            # RR (FIX HARD)
-            # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            rr = 1.8 + min(0.7, f["score"] * 0.03)
+            # 🔥 FIX RR (QUAN TRỌNG NHẤT)
+            rr = 1.6 + min(0.6, f["score"] * 0.02)
 
-            # =========================
-            # META
-            # =========================
             signal = {
                 "symbol": symbol,
                 "rr": rr,
@@ -271,7 +274,8 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if prob < 0.55 and len(history) > 50:
                 continue
 
-            size_scale = 0.3 + prob * 0.7
+            # 🔥 FIX SIZE (GIẢM RỦI RO)
+            size_scale = 0.2 + prob * 0.5
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
             if future_df.empty:
@@ -288,7 +292,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             elif result == -1:
                 equity -= risk_amount
             elif result == -0.5:
-                equity -= risk_amount * 0.5   # 🔥 loss nhẹ
+                equity -= risk_amount * 0.5
 
             history.append({
                 "date": date,
