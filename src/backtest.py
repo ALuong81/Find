@@ -99,6 +99,12 @@ def simulate_trade(df, entry, sl, rr):
 
         if h >= tp2:
             return 1
+        
+        # =========================
+        # 🔥 TIME STOP (NEW)
+        # =========================      
+        if i >= 5:   # 5 ngày không đi → thoát
+            return 0
 
     if hit_tp1:
         return 0
