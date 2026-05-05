@@ -4,7 +4,9 @@ import pickle
 import os
 import time
 
-# 🔥 SAFE IMPORT (KHÔNG CÓ SKLEARN VẪN CHẠY)
+# =========================
+# SAFE IMPORT
+# =========================
 try:
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import StandardScaler
@@ -32,19 +34,19 @@ def ensure_data_file():
 
 
 # =========================
-# ENCODE SIGNAL
+# 🔥 ENCODE SIGNAL (FIX SCALE)
 # =========================
 def encode_signal(signal):
 
     regime_map = {"AGGRESSIVE": 1, "NEUTRAL": 0, "DEFENSIVE": -1}
-    type_map = {"breakout": 1, "pullback": 0, "unknown": -1}
+    type_map = {"breakout": 1, "early_break": 0, "pullback": -1}
 
     return np.array([
         signal["rr"],
-        signal["score"],
-        signal["correlation"],
-        signal["volatility"],
-        signal["liquidity"],
+        signal["score"] / 10,                  # 🔥 normalize score
+        signal["correlation"],                 # giữ nguyên
+        signal["volatility"] * 100,            # 🔥 scale lên
+        np.log1p(signal["liquidity"]),         # 🔥 log scale
         regime_map.get(signal["regime"], 0),
         type_map.get(signal["type"], 0)
     ])
@@ -118,7 +120,7 @@ def train_meta_model():
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
-    model = LogisticRegression(max_iter=200)
+    model = LogisticRegression(max_iter=300)
     model.fit(X_scaled, y)
 
     save_model(model, scaler)
@@ -127,35 +129,48 @@ def train_meta_model():
 
 
 # =========================
-# 🔥 FALLBACK LOGIC (NO SKLEARN)
+# 🔥 FALLBACK LOGIC (EDGE VERSION)
 # =========================
 def fallback_prob(signal):
-    """
-    Khi không có model → dùng heuristic thông minh
-    """
 
+    # =========================
+    # BASE SCORE
+    # =========================
     score = 0
 
-    # RR cao → tốt
-    score += (signal["rr"] - 1.5) * 0.3
+    # RR (giảm weight)
+    score += (signal["rr"] - 1.5) * 0.15
 
-    # entry score mạnh
-    score += signal["score"] * 0.15
+    # entry quality
+    score += signal["score"] * 0.08
 
-    # volatility tốt
-    score += signal["volatility"] * 5
+    # volatility sweet spot (~0.015–0.03)
+    vol = signal["volatility"]
+    score += -abs(vol - 0.02) * 20
 
-    # correlation thấp tốt hơn (tránh market risk)
-    score -= abs(signal["correlation"]) * 0.2
+    # correlation (ưu tiên thấp)
+    score -= abs(signal["correlation"]) * 0.3
 
     # regime boost
     if signal["regime"] == "AGGRESSIVE":
-        score += 0.3
+        score += 0.25
+    elif signal["regime"] == "DEFENSIVE":
+        score -= 0.3
 
-    # sigmoid squash
+    # 🔥 penalty early break (rất quan trọng)
+    if signal["type"] == "early_break":
+        score -= 0.2
+
+    # liquidity (log scale)
+    score += np.log1p(signal["liquidity"]) * 0.05
+
+    # =========================
+    # SIGMOID
+    # =========================
     prob = 1 / (1 + np.exp(-score))
 
-    return float(np.clip(prob, 0.3, 0.8))  # tránh overconfidence
+    # clamp realistic
+    return float(np.clip(prob, 0.35, 0.75))
 
 
 # =========================
@@ -165,7 +180,6 @@ def meta_filter_v6(signal):
 
     model, scaler = load_model()
 
-    # 🔥 nếu chưa có model → dùng fallback
     if model is None or not SKLEARN_AVAILABLE:
         return fallback_prob(signal)
 
@@ -175,8 +189,7 @@ def meta_filter_v6(signal):
 
         prob = float(model.predict_proba(x_scaled)[0][1])
 
-        # clamp tránh overfit
-        return float(np.clip(prob, 0.2, 0.9))
+        return float(np.clip(prob, 0.25, 0.85))
 
     except:
         return fallback_prob(signal)
