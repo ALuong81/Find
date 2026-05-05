@@ -114,8 +114,10 @@ def entry_score_v7(df):
     # =========================
     recent_high_buffer = recent_high * 0.996
 
-    true_break = (prev_close < recent_high_buffer) and (entry >= recent_high_buffer)
+    #true_break = (prev_close < recent_high_buffer) and (entry >= recent_high_buffer)
 
+    true_break = entry >= recent_high * 0.998
+   
     # =========================
     # DISTANCE (ANTI CHASE)
     # =========================
@@ -137,7 +139,7 @@ def entry_score_v7(df):
     # =========================
     # 🔥 MAIN BREAKOUT
     # =========================
-    if true_break and vol_ratio >= 1.2:
+    if true_break and vol_ratio >= 1.1:
 
         # 🔥 adaptive SL theo vol
         if vol_std_20 > 0.025:
