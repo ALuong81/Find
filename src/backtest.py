@@ -221,7 +221,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
                     flow_acc * 1.2 +
                     (1 if acc else 0)
                 )
-
+p
                 scored.append((symbol, score, rs))
 
             except:
@@ -281,7 +281,10 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             prob = meta_filter_v6(signal)
 
-            if prob < config["meta_threshold"]:
+            # if prob < config["meta_threshold"]:
+              #  continue
+            # nếu chưa train → bỏ filter
+            if prob < 0.55 and len(history) > 30:
                 continue
 
             size_scale = 0.3 + prob * 0.7
