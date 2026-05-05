@@ -189,7 +189,7 @@ def meta_filter_v6(signal):
 
         prob = float(model.predict_proba(x_scaled)[0][1])
 
-        return float(np.clip(prob, 0.25, 0.85))
+        return float(np.clip(prob, 0.35, 0.65))
 
     except:
         return fallback_prob(signal)
