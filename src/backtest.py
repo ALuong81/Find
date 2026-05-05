@@ -246,6 +246,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             f = entry_score_v7(df)
             if f is None:
+                print(symbol, "⛔ entry_fail")
                 continue
 
             # =========================
