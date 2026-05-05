@@ -23,10 +23,10 @@ MAX_HOLD_DAYS = 15
 
 
 # =========================
-# CONFIG (EDGE READY)
+# CONFIG
 # =========================
 DEFAULT_CONFIG = {
-    "rsi_max": 78,
+    "rsi_max": 75,            # 🔥 siết lại tránh đỉnh
     "meta_threshold": 0.55,
     "cooldown_days": 3,
     "max_trades": 2
@@ -77,12 +77,12 @@ def market_regime(df_index):
 
 
 # =========================
-# 🔥 EXIT ENGINE (EDGE THẬT)
+# 🔥 EXIT ENGINE (BREAKEVEN LOGIC)
 # =========================
 def simulate_trade(df, entry, sl, rr):
 
-    tp1 = entry + (entry - sl) * 1.0   # RR 1
-    tp2 = entry + (entry - sl) * rr    # RR full
+    tp1 = entry + (entry - sl) * 1.0
+    tp2 = entry + (entry - sl) * rr
 
     hit_tp1 = False
 
@@ -90,20 +90,16 @@ def simulate_trade(df, entry, sl, rr):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # SL
         if l <= sl:
             return -1
 
-        # TP1
         if not hit_tp1 and h >= tp1:
             hit_tp1 = True
-            sl = entry  # 🔥 BE
+            sl = entry  # BE
 
-        # TP2
         if h >= tp2:
             return 1
 
-    # nếu không hit gì → breakeven nếu đã TP1
     if hit_tp1:
         return 0
 
@@ -169,9 +165,8 @@ def run_backtest(config=None, start_date="2023-01-01"):
         if len(df_index) < 50:
             continue
 
-        mode, m_score = market_regime(df_index)
+        mode, _ = market_regime(df_index)
 
-        # 🔥 chỉ trade khi market có bias
         if mode == "DEFENSIVE":
             continue
 
@@ -179,7 +174,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         max_trades = config["max_trades"]
 
         # =========================
-        # SECTOR
+        # SECTOR FILTER
         # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
@@ -221,6 +216,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
                     flow_acc * 1.2 +
                     (1 if acc else 0)
                 )
+
                 scored.append((symbol, score, rs))
 
             except:
@@ -243,29 +239,43 @@ def run_backtest(config=None, start_date="2023-01-01"):
             df = df_full[df_full["date"] <= date]
 
             f = entry_score_v7(df)
-
             if f is None:
+                continue
+
+            # =========================
+            # 🔥 TREND FILTER (QUAN TRỌNG)
+            # =========================
+            ma20 = df["close"].rolling(20).mean().iloc[-1]
+            ma50 = df["close"].rolling(50).mean().iloc[-1]
+
+            if ma20 < ma50:
+                continue
+
+            # =========================
+            # 🔥 MOMENTUM FILTER
+            # =========================
+            if df["close"].iloc[-1] < df["close"].iloc[-5]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
 
             # =========================
-            # RSI FILTER
+            # RSI
             # =========================
             if compute_rsi(df["close"]) > config["rsi_max"]:
                 continue
 
             # =========================
-            # RR DYNAMIC
+            # RR CONTROL (🔥 FIX CHÍNH)
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            rr = 1.5 + f["score"] * 0.2   # 🔥 EDGE CORE
+            rr = min(2.5, max(1.5, 1.5 + f["score"] * 0.1))
 
             # =========================
-            # META FILTER
+            # META
             # =========================
             signal = {
                 "symbol": symbol,
@@ -280,10 +290,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             prob = meta_filter_v6(signal)
 
-            # if prob < config["meta_threshold"]:
-              #  continue
-            # nếu chưa train → bỏ filter
-            if prob < 0.55 and len(history) > 30:
+            if prob < 0.55 and len(history) > 50:
                 continue
 
             size_scale = 0.3 + prob * 0.7
