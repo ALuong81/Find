@@ -60,11 +60,11 @@ def entry_score_v7(df):
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1]
 
-    if ma20 <= ma50:
-        return None
+    # if ma20 <= ma50:
+       # return None
 
     trend_strength = abs(ma20 - ma50) / (ma50 + 1e-9)
-    if trend_strength < 0.01:
+    if trend_strength < 0.003:
         return None
 
     # =========================
@@ -95,7 +95,8 @@ def entry_score_v7(df):
     # RSI
     # =========================
     rsi = compute_rsi(close)
-    if rsi > 78:
+    if rsi > 90:
+        
         return None
 
     # =========================
@@ -123,7 +124,7 @@ def entry_score_v7(df):
     # =========================
     # 🔥 MAIN BREAKOUT (FIXED)
     # =========================
-    if true_break and vol_ratio >= 1.4:
+    if true_break and vol_ratio >= 1.25:
 
         sl = entry - atr * 2.0
         risk = entry - sl
