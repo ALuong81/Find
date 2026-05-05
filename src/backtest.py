@@ -186,7 +186,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         sector_df = sector_rotation(sector_df)
 
         leaders = []
-        for _, row in sector_df.head(3).iterrows():
+        for _, row in sector_df.head(5).iterrows():
             leaders += pick_leaders(df_symbols, row["sector"])["symbol"].tolist()
 
         leaders = list(set(leaders))
