@@ -221,7 +221,6 @@ def run_backtest(config=None, start_date="2023-01-01"):
                     flow_acc * 1.2 +
                     (1 if acc else 0)
                 )
-p
                 scored.append((symbol, score, rs))
 
             except:
