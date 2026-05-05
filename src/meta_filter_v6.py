@@ -149,7 +149,7 @@ def fallback_prob(signal):
     score += -abs(vol - 0.02) * 20
 
     # correlation (ưu tiên thấp)
-    score -= abs(signal["correlation"]) * 0.3
+    score -= abs(signal["correlation"]) * 0.4
 
     # regime boost
     if signal["regime"] == "AGGRESSIVE":
@@ -170,7 +170,7 @@ def fallback_prob(signal):
     prob = 1 / (1 + np.exp(-score))
 
     # clamp realistic
-    return float(np.clip(prob, 0.35, 0.75))
+    return float(np.clip(prob, 0.4, 0.7))
 
 
 # =========================
@@ -189,7 +189,7 @@ def meta_filter_v6(signal):
 
         prob = float(model.predict_proba(x_scaled)[0][1])
 
-        return float(np.clip(prob, 0.35, 0.65))
+        return float(np.clip(prob, 0.4, 0.7))
 
     except:
         return fallback_prob(signal)
