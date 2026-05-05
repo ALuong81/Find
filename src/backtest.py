@@ -26,27 +26,10 @@ MAX_HOLD_DAYS = 15
 # CONFIG
 # =========================
 DEFAULT_CONFIG = {
-    "rsi_max": 75,
     "meta_threshold": 0.55,
     "cooldown_days": 3,
     "max_trades": 2
 }
-
-
-# =========================
-# RSI
-# =========================
-def compute_rsi(close, period=14):
-    delta = close.diff()
-    up = np.maximum(delta, 0.0)
-    down = np.maximum(-delta, 0.0)
-
-    ma_up = up.rolling(period).mean()
-    ma_down = down.rolling(period).mean()
-
-    rs = ma_up / (ma_down + 1e-9)
-    rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
 
 
 # =========================
@@ -77,7 +60,7 @@ def market_regime(df_index):
 
 
 # =========================
-# 🔥 EXIT ENGINE (FIX EDGE)
+# 🔥 EXIT ENGINE (FIX THỰC CHIẾN)
 # =========================
 def simulate_trade(df, entry, sl, rr):
 
@@ -90,24 +73,23 @@ def simulate_trade(df, entry, sl, rr):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
-        # SL
+        # ❗ SL cứng
         if l <= sl:
             return -1
 
-        # TP1 → BE
+        # 🔥 TP1 → BE
         if not hit_tp1 and h >= tp1:
             hit_tp1 = True
             sl = entry
 
-        # TP2
+        # 🔥 TP2
         if h >= tp2:
             return 1
 
-        # 🔥 TIME STOP (ADAPTIVE)
+        # 🔥 TIME STOP THÔNG MINH
         if i >= 7:
-            # nếu chưa đi gì → cắt
             if not hit_tp1:
-                return 0
+                return -0.5   # 🔥 loss nhẹ thay vì 0
 
     return 0
 
@@ -180,7 +162,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         max_trades = config["max_trades"]
 
         # =========================
-        # SECTOR
+        # SECTOR FILTER
         # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
@@ -250,21 +232,25 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 continue
 
             # =========================
-            # MOMENTUM (FIX)
+            # 🔥 MOMENTUM FILTER (FIX)
             # =========================
-            if df["close"].iloc[-1] < df["close"].iloc[-2]:
+            if df["close"].iloc[-1] < df["close"].iloc[-3]:
+                continue
+
+            # 🔥 tránh nến đảo chiều
+            if df["close"].iloc[-1] < df["open"].iloc[-1]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
 
             # =========================
-            # RR FIX (CRITICAL)
+            # RR (FIX HARD)
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            rr = 1.8 + min(1.2, f["score"] * 0.05)
+            rr = 1.8 + min(0.7, f["score"] * 0.03)
 
             # =========================
             # META
@@ -301,6 +287,8 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 equity += risk_amount * rr
             elif result == -1:
                 equity -= risk_amount
+            elif result == -0.5:
+                equity -= risk_amount * 0.5   # 🔥 loss nhẹ
 
             history.append({
                 "date": date,
