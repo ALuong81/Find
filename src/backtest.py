@@ -26,7 +26,7 @@ MAX_HOLD_DAYS = 15
 # CONFIG
 # =========================
 DEFAULT_CONFIG = {
-    "rsi_max": 75,            # 🔥 siết lại tránh đỉnh
+    "rsi_max": 75,
     "meta_threshold": 0.55,
     "cooldown_days": 3,
     "max_trades": 2
@@ -77,7 +77,7 @@ def market_regime(df_index):
 
 
 # =========================
-# 🔥 EXIT ENGINE (BREAKEVEN LOGIC)
+# 🔥 EXIT ENGINE (FIX EDGE)
 # =========================
 def simulate_trade(df, entry, sl, rr):
 
@@ -90,24 +90,24 @@ def simulate_trade(df, entry, sl, rr):
         h = df["high"].iloc[i]
         l = df["low"].iloc[i]
 
+        # SL
         if l <= sl:
             return -1
 
+        # TP1 → BE
         if not hit_tp1 and h >= tp1:
             hit_tp1 = True
-            sl = entry  # BE
+            sl = entry
 
+        # TP2
         if h >= tp2:
             return 1
-        
-        # =========================
-        # 🔥 TIME STOP (NEW)
-        # =========================      
-        if i >= 5:   # 5 ngày không đi → thoát
-            return 0
 
-    if hit_tp1:
-        return 0
+        # 🔥 TIME STOP (ADAPTIVE)
+        if i >= 7:
+            # nếu chưa đi gì → cắt
+            if not hit_tp1:
+                return 0
 
     return 0
 
@@ -180,7 +180,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
         max_trades = config["max_trades"]
 
         # =========================
-        # SECTOR FILTER
+        # SECTOR
         # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
@@ -249,7 +249,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 continue
 
             # =========================
-            # 🔥 TREND FILTER (QUAN TRỌNG)
+            # TREND CONFIRM
             # =========================
             ma20 = df["close"].rolling(20).mean().iloc[-1]
             ma50 = df["close"].rolling(50).mean().iloc[-1]
@@ -258,27 +258,25 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 continue
 
             # =========================
-            # 🔥 MOMENTUM FILTER
+            # MOMENTUM (FIX)
             # =========================
-            if df["close"].iloc[-1] < df["close"].iloc[-5]:
+            if df["close"].iloc[-1] < df["close"].iloc[-3]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
 
-            # =========================
             # RSI
-            # =========================
             if compute_rsi(df["close"]) > config["rsi_max"]:
                 continue
 
             # =========================
-            # RR CONTROL (🔥 FIX CHÍNH)
+            # RR FIX (CRITICAL)
             # =========================
             risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
-            rr = min(2.5, max(1.5, 1.5 + f["score"] * 0.1))
+            rr = 1.8 + min(1.2, f["score"] * 0.05)
 
             # =========================
             # META
