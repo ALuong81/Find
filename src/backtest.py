@@ -249,25 +249,12 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 continue
 
             # =========================
-            # TREND CONFIRM
-            # =========================
-            ma20 = df["close"].rolling(20).mean().iloc[-1]
-            ma50 = df["close"].rolling(50).mean().iloc[-1]
-
-            if ma20 < ma50:
-                continue
-
-            # =========================
             # MOMENTUM (FIX)
             # =========================
-            if df["close"].iloc[-1] < df["close"].iloc[-3]:
+            if df["close"].iloc[-1] < df["close"].iloc[-2]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
-
-            # RSI
-            if compute_rsi(df["close"]) > config["rsi_max"]:
-                continue
 
             # =========================
             # RR FIX (CRITICAL)
