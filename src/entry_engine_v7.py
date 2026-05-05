@@ -2,6 +2,7 @@ import numpy as np
 from breakout import breakout_type
 from accumulation import detect_accumulation
 
+
 # =========================
 # UTIL
 # =========================
@@ -41,7 +42,7 @@ def compute_rsi(close, period=14):
 
 
 # =========================
-# ENTRY SCORE ENGINE (V7.3 - EDGE FIX)
+# ENTRY SCORE ENGINE (V7.4 - EDGE REAL)
 # =========================
 def entry_score_v7(df):
 
@@ -53,6 +54,23 @@ def entry_score_v7(df):
     low = df["low"]
     volume = df["volume"]
 
+    # =========================
+    # TREND FILTER (🔥 NEW - QUAN TRỌNG)
+    # =========================
+    ma20 = close.rolling(20).mean().iloc[-1]
+    ma50 = close.rolling(50).mean().iloc[-1]
+
+    # ❗ Không trade nếu trend yếu
+    if ma20 <= ma50:
+        return None
+
+    trend_strength = abs(ma20 - ma50) / (ma50 + 1e-9)
+    if trend_strength < 0.01:
+        return None
+
+    # =========================
+    # RANGE CONTROL
+    # =========================
     recent_high = high.tail(20).max()
     recent_low = low.tail(20).min()
     range_pct = (recent_high - recent_low) / recent_low
@@ -65,6 +83,7 @@ def entry_score_v7(df):
     # =========================
     vol_std_20 = close.pct_change().rolling(20).std().iloc[-1]
     vol_std_5 = close.pct_change().rolling(5).std().iloc[-1]
+
     vol_compress_score = max(0, (vol_std_20 - vol_std_5) * 20)
 
     # =========================
@@ -81,29 +100,32 @@ def entry_score_v7(df):
         return None
 
     # =========================
-    # ATR (🔥 QUAN TRỌNG)
+    # ATR
     # =========================
     atr = compute_atr(df)
 
     entry = close.iloc[-1]
 
     # =========================
-    # 🔥 MAIN BREAKOUT
+    # 🔥 MAIN BREAKOUT (FIX)
     # =========================
-    if entry >= recent_high * 0.995 and vol_ratio >= 1.3:
+    if entry >= recent_high * 0.997 and vol_ratio >= 1.4:
 
-        # ❗ SL mới (ATR-based)
-        sl = entry - atr * 1.5
+        # ❗ SL sâu hơn → tránh bị quét
+        sl = entry - atr * 2.0
         risk = entry - sl
 
         if risk <= 0:
             return None
 
+        breakout_strength = (entry - recent_high) / (recent_high + 1e-9)
+
         score = (
-            (0.22 - range_pct) * 6 +
+            (0.22 - range_pct) * 5 +
             vol_compress_score +
-            vol_ratio * 2 +          # 🔥 tăng weight volume
-            (1 - abs(entry - recent_high)/recent_high) * 5
+            vol_ratio * 2 +
+            trend_strength * 10 +
+            breakout_strength * 50
         )
 
         return {
@@ -116,28 +138,28 @@ def entry_score_v7(df):
         }
 
     # =========================
-    # 🔥 EARLY BREAK (ANTI FAKE)
+    # 🔥 EARLY BREAK (ANTI FAKE - FIX MẠNH)
     # =========================
-    if entry >= recent_high * 0.985:
+    if entry >= recent_high * 0.99:
 
         acc = detect_accumulation(df)
 
-        # 🔥 thêm filter distance + volume mạnh hơn
-        distance = (recent_high - entry) / recent_high
+        distance = (recent_high - entry) / (recent_high + 1e-9)
 
-        if vol_ratio >= 1.25 and acc and distance < 0.015:
+        if vol_ratio >= 1.3 and acc and distance < 0.01:
 
-            sl = entry - atr * 1.3
+            sl = entry - atr * 1.8
             risk = entry - sl
 
             if risk <= 0:
                 return None
 
             score = (
-                0.8 +
+                0.5 +
                 vol_compress_score * 0.5 +
                 vol_ratio * 1.5 +
-                (1 - distance) * 4
+                trend_strength * 8 +
+                (1 - distance) * 5
             )
 
             return {
