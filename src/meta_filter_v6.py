@@ -34,20 +34,38 @@ def ensure_data_file():
 
 
 # =========================
-# 🔥 ENCODE SIGNAL (FIX SCALE)
+# 🔥 ENCODE SIGNAL (FIX FULL)
 # =========================
 def encode_signal(signal):
 
     regime_map = {"AGGRESSIVE": 1, "NEUTRAL": 0, "DEFENSIVE": -1}
-    type_map = {"breakout": 1, "early_break": 0, "pullback": -1}
+
+    # 🔥 FIX: thêm đầy đủ type mới
+    type_map = {
+        "breakout": 1,
+        "early_break": 0.5,
+        "weak_break": 0.2,
+        "pullback": 0,
+        "unknown": -1
+    }
 
     return np.array([
         signal["rr"],
-        signal["score"] / 10,                  # 🔥 normalize score
-        signal["correlation"],                 # giữ nguyên
-        signal["volatility"] * 100,            # 🔥 scale lên
-        np.log1p(signal["liquidity"]),         # 🔥 log scale
+
+        # 🔥 FIX: scale score ổn định hơn
+        signal["score"] / 10,
+
+        # correlation giữ nguyên
+        signal["correlation"],
+
+        # 🔥 FIX: scale volatility hợp lý hơn
+        signal["volatility"] * 100,
+
+        # 🔥 FIX: tránh log(0)
+        np.log1p(max(signal["liquidity"], 1)),
+
         regime_map.get(signal["regime"], 0),
+
         type_map.get(signal["type"], 0)
     ])
 
@@ -90,7 +108,14 @@ def update_meta_v6(signal, result):
     ensure_data_file()
 
     X = encode_signal(signal)
-    y = 1 if result == 1 else 0
+
+    # 🔥 FIX: BE (-0.5) không nên coi là loss hoàn toàn
+    if result == 1:
+        y = 1
+    elif result == -1:
+        y = 0
+    else:
+        y = 0.3   # 🔥 neutral outcome
 
     row = pd.DataFrame([np.append(X, y)], columns=COLUMNS)
 
@@ -129,48 +154,63 @@ def train_meta_model():
 
 
 # =========================
-# 🔥 FALLBACK LOGIC (EDGE VERSION)
+# 🔥 FALLBACK LOGIC (FIX EDGE)
 # =========================
 def fallback_prob(signal):
 
-    # =========================
-    # BASE SCORE
-    # =========================
     score = 0
 
-    # RR (giảm weight)
-    score += (signal["rr"] - 1.5) * 0.15
+    # =========================
+    # RR (giảm bias)
+    # =========================
+    score += (signal["rr"] - 1.5) * 0.12
 
-    # entry quality
-    score += signal["score"] * 0.08
+    # =========================
+    # ENTRY QUALITY
+    # =========================
+    score += signal["score"] * 0.07
 
-    # volatility sweet spot (~0.015–0.03)
+    # =========================
+    # VOLATILITY SWEET SPOT
+    # =========================
     vol = signal["volatility"]
-    score += -abs(vol - 0.02) * 20
+    score += -abs(vol - 0.02) * 18
 
-    # correlation (ưu tiên thấp)
-    score -= abs(signal["correlation"]) * 0.4
+    # =========================
+    # CORRELATION (giảm penalty)
+    # =========================
+    score -= abs(signal["correlation"]) * 0.25
 
-    # regime boost
+    # =========================
+    # REGIME
+    # =========================
     if signal["regime"] == "AGGRESSIVE":
         score += 0.25
     elif signal["regime"] == "DEFENSIVE":
         score -= 0.3
 
-    # 🔥 penalty early break (rất quan trọng)
+    # =========================
+    # TYPE LOGIC (🔥 FIX QUAN TRỌNG)
+    # =========================
     if signal["type"] == "early_break":
-        score -= 0.2
+        score -= 0.25
+    elif signal["type"] == "weak_break":
+        score -= 0.1
+    elif signal["type"] == "breakout":
+        score += 0.15
 
-    # liquidity (log scale)
-    score += np.log1p(signal["liquidity"]) * 0.05
+    # =========================
+    # LIQUIDITY
+    # =========================
+    score += np.log1p(signal["liquidity"]) * 0.04
 
     # =========================
     # SIGMOID
     # =========================
     prob = 1 / (1 + np.exp(-score))
 
-    # clamp realistic
-    return float(np.clip(prob, 0.4, 0.7))
+    # 🔥 FIX: realistic range hơn
+    return float(np.clip(prob, 0.45, 0.7))
 
 
 # =========================
@@ -189,7 +229,7 @@ def meta_filter_v6(signal):
 
         prob = float(model.predict_proba(x_scaled)[0][1])
 
-        return float(np.clip(prob, 0.4, 0.7))
+        return float(np.clip(prob, 0.4, 0.75))
 
     except:
         return fallback_prob(signal)
