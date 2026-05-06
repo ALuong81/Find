@@ -15,16 +15,13 @@ from money_flow import money_flow_score
 from flow_timeline import flow_timeline
 
 from entry_engine_v7 import entry_score_v7
-from meta_filter_v6 import meta_filter_v6, update_meta_v6, save_meta
+from meta_filter_v7 import meta_filter_v7, update_meta_v7, save_meta
 
 
 INITIAL_CAPITAL = 100000
 MAX_HOLD_DAYS = 15
 
 
-# =========================
-# CONFIG
-# =========================
 DEFAULT_CONFIG = {
     "meta_threshold": 0.55,
     "cooldown_days": 3,
@@ -32,9 +29,6 @@ DEFAULT_CONFIG = {
 }
 
 
-# =========================
-# MARKET REGIME
-# =========================
 def market_regime(df_index):
 
     close = df_index["close"]
@@ -59,9 +53,6 @@ def market_regime(df_index):
         return "DEFENSIVE", score
 
 
-# =========================
-# 🔥 EXIT ENGINE (FIX THỰC CHIẾN)
-# =========================
 def simulate_trade(df, entry, sl, rr):
 
     tp1 = entry + (entry - sl) * 1.0
@@ -83,7 +74,6 @@ def simulate_trade(df, entry, sl, rr):
         if h >= tp2:
             return 1
 
-        # 🔥 FIX: cắt sớm hơn
         if i >= 5:
             if not hit_tp1:
                 return -0.5
@@ -91,9 +81,6 @@ def simulate_trade(df, entry, sl, rr):
     return 0
 
 
-# =========================
-# PRELOAD
-# =========================
 def preload_all(symbols):
 
     data_map = {}
@@ -117,9 +104,6 @@ def preload_all(symbols):
     return data_map
 
 
-# =========================
-# BACKTEST EDGE VERSION
-# =========================
 def run_backtest(config=None, start_date="2023-01-01"):
 
     if config is None:
@@ -155,16 +139,12 @@ def run_backtest(config=None, start_date="2023-01-01"):
         if mode == "DEFENSIVE":
             continue
 
-        # 🔥 NEW: MARKET MOMENTUM FILTER
         if df_index["close"].iloc[-1] < df_index["close"].iloc[-5]:
             continue
 
         base_risk_pct = 0.02
         max_trades = config["max_trades"]
 
-        # =========================
-        # SECTOR FILTER
-        # =========================
         sector_df = sector_money_flow(df_symbols)
         sector_df = sector_rotation(sector_df)
 
@@ -232,24 +212,13 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 print(symbol, "⛔ entry_fail")
                 continue
 
-            # 🔥 NEW: SIDEWAY FILTER
             range_10 = (df["high"].tail(10).max() - df["low"].tail(10).min()) / df["low"].tail(10).min()
             if range_10 < 0.02:
                 continue
 
-            # 🔥 allow weak breakout if score cao
-            if f["score"] > 8:
-                pass
-
-            # 🔥 MOMENTUM
             if df["close"].iloc[-1] < df["close"].iloc[-2]:
                 continue
 
-            # 🔥 BREAKOUT CONFIRM
-            #if df["close"].iloc[-1] < df["high"].iloc[-2]:
-            #   continue
-
-            # 🔥 tránh nến đỏ
             if df["close"].iloc[-1] < df["open"].iloc[-1]:
                 continue
 
@@ -259,7 +228,6 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if risk <= 0:
                 continue
 
-            # 🔥 FIX RR (QUAN TRỌNG NHẤT)
             rr = 1.6 + min(0.6, f["score"] * 0.02)
 
             signal = {
@@ -270,15 +238,28 @@ def run_backtest(config=None, start_date="2023-01-01"):
                 "correlation": rs,
                 "volatility": f["volatility"],
                 "liquidity": f["liquidity"],
-                "type": f["type"]
+                "type": f["type"],
+
+                "trend_strength": abs(
+                    df["close"].rolling(20).mean().iloc[-1] -
+                    df["close"].rolling(50).mean().iloc[-1]
+                ) / (df["close"].rolling(50).mean().iloc[-1] + 1e-9),
+
+                "vol_ratio": df["volume"].iloc[-1] / (
+                    df["volume"].rolling(20).mean().iloc[-1] + 1e-9
+                ),
+
+                "breakout_strength": (
+                    df["close"].iloc[-1] -
+                    df["high"].tail(20).max()
+                ) / (df["high"].tail(20).max() + 1e-9)
             }
 
-            prob = meta_filter_v6(signal)
+            prob = meta_filter_v7(signal)
 
             if prob < 0.55 and len(history) > 50:
                 continue
 
-            # 🔥 FIX SIZE (GIẢM RỦI RO)
             size_scale = 0.2 + prob * 0.5
 
             future_df = df_full[df_full["date"] > date].head(MAX_HOLD_DAYS)
@@ -287,7 +268,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             result = simulate_trade(future_df, f["entry"], f["sl"], rr)
 
-            update_meta_v6(signal, result)
+            update_meta_v7(signal, result)
 
             risk_amount = equity * base_risk_pct * size_scale
 
