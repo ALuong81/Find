@@ -61,7 +61,7 @@ def entry_score_v7(df):
 
     trend_strength = abs(ma20 - ma50) / (ma50 + 1e-9)
 
-    if trend_strength < 0.0025:
+    if trend_strength < 0.001:
         return None
 
     # =========================
