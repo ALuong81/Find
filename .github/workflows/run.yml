@@ -32,10 +32,17 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install
-        run: pip install vnstock pandas
+      # 🔥 FIX 1: chuẩn hoá python + pip
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      # 🔥 CACHE THEO NGÀY
+      # 🔥 FIX 2: dùng requirements
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
       - name: Restore market cache
         uses: actions/cache@v3
         with:
@@ -53,9 +60,6 @@ jobs:
           path: data/market
           key: market-${{ runner.os }}-${{ github.run_id }}
 
-      # =========================
-      # 🔥 WORKTREE PUSH FIXED
-      # =========================
       - name: Push data via worktree
         run: |
           git config --global user.name "bot"
@@ -65,7 +69,6 @@ jobs:
 
           rm -rf data-wt || true
 
-          # tạo worktree
           if git ls-remote --exit-code --heads origin data; then
             git worktree add data-wt origin/data
           else
@@ -73,8 +76,6 @@ jobs:
           fi
 
           cd data-wt
-
-          # 🔥 FIX DETACHED HEAD
           git checkout -B data || git checkout data
 
           mkdir -p data/market
@@ -82,7 +83,6 @@ jobs:
           cp ../data/liquidity.csv data/ || true
 
           git add .
-
           git commit -m "update market data $(date)" || echo "no change"
 
           git pull --rebase origin data || true
@@ -106,6 +106,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # 🔥 FIX
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Restore market cache
         uses: actions/cache@v3
         with:
@@ -114,7 +119,6 @@ jobs:
           restore-keys: |
             market-${{ runner.os }}-
 
-      # 🔥 fallback nếu cache miss
       - name: Fallback load data branch
         run: |
           if [ ! -d "data/market" ] || [ -z "$(ls -A data/market)" ]; then
@@ -123,8 +127,11 @@ jobs:
             cp -r data-tmp/data/market data/ || true
           fi
 
+      # 🔥 FIX: dùng requirements
       - name: Install
-        run: pip install vnstock pandas requests
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
       - name: Create log folder
         run: mkdir -p logs
@@ -157,6 +164,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # 🔥 FIX 1: python version
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
       - name: Restore market cache
         uses: actions/cache@v3
         with:
@@ -165,8 +177,16 @@ jobs:
           restore-keys: |
             market-${{ runner.os }}-
 
+      # 🔥 FIX 2: install đầy đủ
       - name: Install
-        run: pip install vnstock pandas numpy
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 🔥 FIX 3: debug sklearn (quan trọng)
+      - name: Debug sklearn
+        run: |
+          python -c "import sklearn; print('SKLEARN OK')"
 
       - name: Create log folder
         run: mkdir -p logs
@@ -180,9 +200,6 @@ jobs:
           name: backtest-log
           path: logs/backtest.log
 
-      # =========================
-      # 🔥 WORKTREE PUSH FIXED
-      # =========================
       - name: Push backtest result
         run: |
           git config --global user.name "bot"
@@ -199,8 +216,6 @@ jobs:
           fi
 
           cd data-wt
-
-          # 🔥 FIX DETACHED HEAD
           git checkout -B data || git checkout data
 
           cp ../backtest_result.csv . || true
