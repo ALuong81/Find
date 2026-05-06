@@ -54,7 +54,7 @@ def entry_score_v7(df):
     volume = df["volume"]
 
     # =========================
-    # TREND (FIX: giữ nhưng không bóp)
+    # TREND
     # =========================
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1]
@@ -83,14 +83,13 @@ def entry_score_v7(df):
     vol_compress_score = max(0, (vol_std_20 - vol_std_5) * 20)
 
     # =========================
-    # VOLUME (FIX: thêm expansion check)
+    # VOLUME
     # =========================
     vol_mean = volume.rolling(20).mean().iloc[-1]
     vol_5 = volume.tail(5).mean()
     vol_ratio = volume.iloc[-1] / (vol_mean + 1e-9)
     vol_expand = volume.iloc[-1] / (vol_5 + 1e-9)
 
-    # 🔥 nếu không có expansion thật → bỏ
     if vol_expand < 1.1:
         return None
 
@@ -107,33 +106,25 @@ def entry_score_v7(df):
     atr = compute_atr(df)
 
     entry = close.iloc[-1]
-    prev_close = close.iloc[-2]
 
     # =========================
-    # BREAKOUT BUFFER
+    # BREAKOUT LOGIC
     # =========================
-    recent_high_buffer = recent_high * 0.995
-
-    #true_break = (prev_close < recent_high_buffer) and (entry >= recent_high_buffer)
-
     true_break = entry >= recent_high * 0.995
-   
-    # =========================
-    # DISTANCE (ANTI CHASE)
-    # =========================
+
     distance = (entry - recent_high) / (recent_high + 1e-9)
 
     if distance > 0.05:
         return None
 
     # =========================
-    # 🔥 BREAKOUT QUALITY (NEW CORE EDGE)
+    # CANDLE QUALITY
     # =========================
     body = abs(close.iloc[-1] - df["open"].iloc[-1])
     candle_range = high.iloc[-1] - low.iloc[-1] + 1e-9
     body_ratio = body / candle_range
 
-    if body_ratio < 0.5:   # 🔥 breakout yếu → loại
+    if body_ratio < 0.5:
         return None
 
     # =========================
@@ -141,7 +132,6 @@ def entry_score_v7(df):
     # =========================
     if true_break and vol_ratio >= 1.0:
 
-        # 🔥 adaptive SL theo vol
         if vol_std_20 > 0.025:
             sl = entry - atr * 2.0
         else:
@@ -173,7 +163,7 @@ def entry_score_v7(df):
         }
 
     # =========================
-    # 🔥 EARLY BREAK (TIGHTEN)
+    # 🔥 EARLY BREAK
     # =========================
     if entry >= recent_high * 0.985:
 
@@ -206,5 +196,32 @@ def entry_score_v7(df):
                 "liquidity": vol_mean,
                 "type": "early_break"
             }
+
+    # =========================
+    # 🔥 WEAK BREAKOUT (NEW PATH)
+    # =========================
+    if entry >= recent_high * 0.99 and vol_ratio >= 1.0:
+
+        sl = entry - atr * 1.8
+        risk = entry - sl
+
+        if risk <= 0:
+            return None
+
+        score = (
+            0.3 +
+            vol_compress_score * 0.3 +
+            vol_ratio * 1.2 +
+            trend_strength * 6
+        )
+
+        return {
+            "entry": entry,
+            "sl": sl,
+            "score": score,
+            "volatility": vol_std_20,
+            "liquidity": vol_mean,
+            "type": "weak_break"
+        }
 
     return None
