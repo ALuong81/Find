@@ -234,16 +234,20 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             # 🔥 NEW: SIDEWAY FILTER
             range_10 = (df["high"].tail(10).max() - df["low"].tail(10).min()) / df["low"].tail(10).min()
-            if range_10 < 0.03:
+            if range_10 < 0.02:
                 continue
 
+            # 🔥 allow weak breakout if score cao
+            if f["score"] > 8:
+                pass
+
             # 🔥 MOMENTUM
-            if df["close"].iloc[-1] < df["close"].iloc[-3]:
+            if df["close"].iloc[-1] < df["close"].iloc[-2]:
                 continue
 
             # 🔥 BREAKOUT CONFIRM
-            if df["close"].iloc[-1] < df["high"].iloc[-2]:
-                continue
+            #if df["close"].iloc[-1] < df["high"].iloc[-2]:
+            #   continue
 
             # 🔥 tránh nến đỏ
             if df["close"].iloc[-1] < df["open"].iloc[-1]:
