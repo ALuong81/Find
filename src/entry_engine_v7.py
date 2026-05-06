@@ -98,7 +98,7 @@ def entry_score_v7(df):
     # RSI
     # =========================
     rsi = compute_rsi(close)
-    if rsi > 85:
+    if rsi > 95:
         return None
 
     # =========================
@@ -112,18 +112,18 @@ def entry_score_v7(df):
     # =========================
     # BREAKOUT BUFFER
     # =========================
-    recent_high_buffer = recent_high * 0.996
+    recent_high_buffer = recent_high * 0.995
 
     #true_break = (prev_close < recent_high_buffer) and (entry >= recent_high_buffer)
 
-    true_break = entry >= recent_high * 0.998
+    true_break = entry >= recent_high * 0.995
    
     # =========================
     # DISTANCE (ANTI CHASE)
     # =========================
     distance = (entry - recent_high) / (recent_high + 1e-9)
 
-    if distance > 0.035:
+    if distance > 0.05:
         return None
 
     # =========================
@@ -139,7 +139,7 @@ def entry_score_v7(df):
     # =========================
     # 🔥 MAIN BREAKOUT
     # =========================
-    if true_break and vol_ratio >= 1.1:
+    if true_break and vol_ratio >= 1.0:
 
         # 🔥 adaptive SL theo vol
         if vol_std_20 > 0.025:
