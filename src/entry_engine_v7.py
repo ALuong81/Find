@@ -41,7 +41,7 @@ def compute_rsi(close, period=14):
 
 
 # =========================
-# ENTRY SCORE ENGINE (V7.7 - REAL EDGE)
+# ENTRY SCORE ENGINE (V7.8 - CLEAN EDGE)
 # =========================
 def entry_score_v7(df):
 
@@ -54,24 +54,26 @@ def entry_score_v7(df):
     volume = df["volume"]
 
     # =========================
-    # TREND
+    # TREND (FIX: siết lại)
     # =========================
     ma20 = close.rolling(20).mean().iloc[-1]
     ma50 = close.rolling(50).mean().iloc[-1]
 
-    trend_strength = abs(ma20 - ma50) / (ma50 + 1e-9)
+    if ma20 < ma50:
+        return None  # 🔥 thêm lại trend filter
 
-    if trend_strength < 0.001:
+    trend_strength = abs(ma20 - ma50) / (ma50 + 1e-9)
+    if trend_strength < 0.003:   # 🔥 tăng từ 0.001 → 0.003
         return None
 
     # =========================
-    # RANGE
+    # RANGE (siết)
     # =========================
     recent_high = high.tail(20).max()
     recent_low = low.tail(20).min()
     range_pct = (recent_high - recent_low) / recent_low
 
-    if range_pct > 0.25:
+    if range_pct > 0.22:   # 🔥 giảm từ 0.25 → 0.22
         return None
 
     # =========================
@@ -83,21 +85,22 @@ def entry_score_v7(df):
     vol_compress_score = max(0, (vol_std_20 - vol_std_5) * 20)
 
     # =========================
-    # VOLUME
+    # VOLUME (siết mạnh)
     # =========================
     vol_mean = volume.rolling(20).mean().iloc[-1]
     vol_5 = volume.tail(5).mean()
+
     vol_ratio = volume.iloc[-1] / (vol_mean + 1e-9)
     vol_expand = volume.iloc[-1] / (vol_5 + 1e-9)
 
-    if vol_expand < 1.1:
+    if vol_expand < 1.2:   # 🔥 tăng từ 1.1 → 1.2
         return None
 
     # =========================
-    # RSI
+    # RSI (siết lại)
     # =========================
     rsi = compute_rsi(close)
-    if rsi > 95:
+    if rsi > 85:   # 🔥 giảm từ 95 → 85
         return None
 
     # =========================
@@ -108,49 +111,54 @@ def entry_score_v7(df):
     entry = close.iloc[-1]
 
     # =========================
-    # BREAKOUT LOGIC
+    # 🔥 TRUE BREAK (FIX QUAN TRỌNG NHẤT)
     # =========================
-    true_break = entry >= recent_high * 0.995
+    prev_close = close.iloc[-2]
+
+    true_break = (
+        (prev_close < recent_high * 0.995) and
+        (entry > recent_high * 1.005)
+    )
 
     distance = (entry - recent_high) / (recent_high + 1e-9)
 
-    if distance > 0.05:
+    if distance > 0.02:   # 🔥 giảm từ 0.05 → 0.02
         return None
 
     # =========================
-    # CANDLE QUALITY
+    # CANDLE QUALITY (siết)
     # =========================
     body = abs(close.iloc[-1] - df["open"].iloc[-1])
     candle_range = high.iloc[-1] - low.iloc[-1] + 1e-9
     body_ratio = body / candle_range
 
-    if body_ratio < 0.5:
+    if body_ratio < 0.6:   # 🔥 tăng từ 0.5 → 0.6
         return None
 
     # =========================
-    # 🔥 MAIN BREAKOUT
+    # 🔥 MAIN BREAKOUT (UPGRADE)
     # =========================
-    if true_break and vol_ratio >= 1.0:
+    if true_break and vol_ratio >= 1.5:   # 🔥 tăng từ 1.0 → 1.5
 
         if vol_std_20 > 0.025:
-            sl = entry - atr * 2.0
+            sl = entry - atr * 2.2
         else:
-            sl = entry - atr * 1.6
+            sl = entry - atr * 1.8
 
         risk = entry - sl
         if risk <= 0:
             return None
 
-        breakout_strength = max(0, distance)
+        breakout_strength = distance
 
         score = (
-            (0.25 - range_pct) * 4 +
-            vol_compress_score +
-            vol_ratio * 2 +
+            (0.22 - range_pct) * 4 +
+            vol_compress_score * 0.8 +
+            vol_ratio * 3 +
             vol_expand * 2 +
-            trend_strength * 8 +
-            breakout_strength * 25 +
-            body_ratio * 5
+            trend_strength * 12 +
+            breakout_strength * 50 +
+            body_ratio * 6
         )
 
         return {
@@ -163,17 +171,17 @@ def entry_score_v7(df):
         }
 
     # =========================
-    # 🔥 EARLY BREAK
+    # 🔥 EARLY BREAK (SIẾT)
     # =========================
-    if entry >= recent_high * 0.985:
+    if entry >= recent_high * 0.99:
 
         acc = detect_accumulation(df)
 
         distance_to_high = (recent_high - entry) / (recent_high + 1e-9)
 
-        if vol_ratio >= 1.2 and acc and distance_to_high < 0.015:
+        if vol_ratio >= 1.5 and acc and distance_to_high < 0.008:
 
-            sl = entry - atr * 1.4
+            sl = entry - atr * 1.6
             risk = entry - sl
 
             if risk <= 0:
@@ -182,10 +190,10 @@ def entry_score_v7(df):
             score = (
                 0.5 +
                 vol_compress_score * 0.5 +
-                vol_ratio * 1.3 +
+                vol_ratio * 1.5 +
                 vol_expand * 1.5 +
-                trend_strength * 6 +
-                (1 - distance_to_high) * 4
+                trend_strength * 8 +
+                (1 - distance_to_high) * 5
             )
 
             return {
@@ -197,31 +205,7 @@ def entry_score_v7(df):
                 "type": "early_break"
             }
 
-    # =========================
-    # 🔥 WEAK BREAKOUT (NEW PATH)
-    # =========================
-    if entry >= recent_high * 0.99 and vol_ratio >= 1.0:
-
-        sl = entry - atr * 1.8
-        risk = entry - sl
-
-        if risk <= 0:
-            return None
-
-        score = (
-            0.3 +
-            vol_compress_score * 0.3 +
-            vol_ratio * 1.2 +
-            trend_strength * 6
-        )
-
-        return {
-            "entry": entry,
-            "sl": sl,
-            "score": score,
-            "volatility": vol_std_20,
-            "liquidity": vol_mean,
-            "type": "weak_break"
-        }
+    # ❌ 🔥 XÓA HOÀN TOÀN WEAK BREAK
+    # → không return gì nữa
 
     return None
