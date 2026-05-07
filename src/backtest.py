@@ -216,15 +216,14 @@ def run_backtest(config=None, start_date="2023-01-01"):
             if range_10 < 0.02:
                 continue
 
-            if df["close"].iloc[-1] < df["close"].iloc[-2]:
+            if df["close"].iloc[-1] < df["close"].iloc[-3]:
                 continue
-
             if df["close"].iloc[-1] < df["open"].iloc[-1]:
                 continue
 
             print(symbol, f["type"], round(f["score"], 2))
 
-            risk = f["entry"] - f["sl"]
+            risk = f["entry"] - f["sl"]l
             if risk <= 0:
                 continue
 
@@ -233,7 +232,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             signal = {
                 "symbol": symbol,
                 "rr": rr,
-                "score": f["score"],
+    mà là           "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
                 "volatility": f["volatility"],
@@ -257,7 +256,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             prob = meta_filter_v7(signal)
 
-            if prob < 0.55 and len(history) > 50:
+            if prob < 0.55 and len(history) > 100:
                 continue
 
             size_scale = 0.2 + prob * 0.5
