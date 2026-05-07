@@ -223,7 +223,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
 
             print(symbol, f["type"], round(f["score"], 2))
 
-            risk = f["entry"] - f["sl"]l
+            risk = f["entry"] - f["sl"]
             if risk <= 0:
                 continue
 
