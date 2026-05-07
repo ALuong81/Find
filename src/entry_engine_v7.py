@@ -100,7 +100,7 @@ def entry_score_v7(df):
     # RSI (siết lại)
     # =========================
     rsi = compute_rsi(close)
-    if rsi > 85:   # 🔥 giảm từ 95 → 85
+    if rsi > 90:   # 🔥 giảm từ 95 → 85
         return None
 
     # =========================
@@ -117,12 +117,12 @@ def entry_score_v7(df):
 
     true_break = (
         (prev_close < recent_high * 0.995) and
-        (entry > recent_high * 1.005)
+        (entry > recent_high * 1.003)
     )
 
     distance = (entry - recent_high) / (recent_high + 1e-9)
 
-    if distance > 0.02:   # 🔥 giảm từ 0.05 → 0.02
+    if distance > 0.03:   # 🔥 giảm từ 0.05 → 0.02
         return None
 
     # =========================
@@ -138,7 +138,7 @@ def entry_score_v7(df):
     # =========================
     # 🔥 MAIN BREAKOUT (UPGRADE)
     # =========================
-    if true_break and vol_ratio >= 1.5:   # 🔥 tăng từ 1.0 → 1.5
+    if true_break and vol_ratio >= 1.2:   # 🔥 tăng từ 1.0 → 1.5
 
         if vol_std_20 > 0.025:
             sl = entry - atr * 2.2
