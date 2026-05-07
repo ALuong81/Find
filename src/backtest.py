@@ -232,7 +232,7 @@ def run_backtest(config=None, start_date="2023-01-01"):
             signal = {
                 "symbol": symbol,
                 "rr": rr,
-    mà là           "score": f["score"],
+                "score": f["score"],
                 "regime": mode,
                 "correlation": rs,
                 "volatility": f["volatility"],
